@@ -15,6 +15,8 @@ import platform
 import shutil
 from pathlib import Path
 
+from safety import SAFE
+
 
 def get_system_info() -> str:
     """Raccoglie alcune informazioni di base sul sistema e le restituisce come testo."""
@@ -89,7 +91,8 @@ GET_SYSTEM_INFO = {
     },
 }
 
-# Elenco dei tool esposti da questo file: coppie (schema, funzione).
+# Elenco dei tool esposti da questo file: terne (schema, funzione, livello di rischio).
+# get_system_info è a sola lettura -> SAFE: non richiederà conferma.
 TOOLS = [
-    (GET_SYSTEM_INFO, get_system_info),
+    (GET_SYSTEM_INFO, get_system_info, SAFE),
 ]

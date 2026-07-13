@@ -15,14 +15,16 @@ from . import system
 # Nelle prossime fasi aggiungeremo qui: files, shell, web.
 _MODULI = [system]
 
-# Costruiamo il "registro": schema per l'API + mappa nome -> funzione.
+# Costruiamo il "registro": schema per l'API + mappa nome -> funzione + mappa nome -> rischio.
 SCHEMAS: list[dict] = []
 _IMPL: dict = {}
+_RISK: dict = {}
 
 for _mod in _MODULI:
-    for _schema, _funzione in _mod.TOOLS:
+    for _schema, _funzione, _rischio in _mod.TOOLS:
         SCHEMAS.append(_schema)
         _IMPL[_schema["name"]] = _funzione
+        _RISK[_schema["name"]] = _rischio
 
 
 def dispatch(name: str, tool_input: dict) -> str:
@@ -33,3 +35,9 @@ def dispatch(name: str, tool_input: dict) -> str:
     funzione = _IMPL[name]
     # tool_input è un dict {nome_argomento: valore}; lo espandiamo come argomenti nominati.
     return funzione(**tool_input)
+
+
+def risk_of(name: str) -> str:
+    """Livello di rischio di un tool. Un nome sconosciuto è trattato come DANGEROUS (fail closed)."""
+    from safety import DANGEROUS
+    return _RISK.get(name, DANGEROUS)
