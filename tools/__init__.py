@@ -15,16 +15,21 @@ from . import files, system, shell
 # Nelle prossime fasi aggiungeremo qui: web.
 _MODULI = [system, files, shell]
 
-# Costruiamo il "registro": schema per l'API + mappa nome -> funzione + mappa nome -> rischio.
+# Costruiamo il "registro": schema per l'API + mappa nome -> funzione + mappa
+# nome -> rischio + mappa nome -> pre-check (validazione categorica prima della conferma).
 SCHEMAS: list[dict] = []
 _IMPL: dict = {}
 _RISK: dict = {}
+_PRECHECK: dict = {}
 
 for _mod in _MODULI:
     for _schema, _funzione, _rischio in _mod.TOOLS:
         SCHEMAS.append(_schema)
         _IMPL[_schema["name"]] = _funzione
         _RISK[_schema["name"]] = _rischio
+    # Le famiglie possono opzionalmente dichiarare PRECHECKS (nome -> validatore).
+    # getattr con default {}: chi non lo dichiara non ha pre-check, ed è normale.
+    _PRECHECK.update(getattr(_mod, "PRECHECKS", {}))
 
 
 def dispatch(name: str, tool_input: dict) -> str:
@@ -41,3 +46,17 @@ def risk_of(name: str) -> str:
     """Livello di rischio di un tool. Un nome sconosciuto è trattato come DANGEROUS (fail closed)."""
     from safety import DANGEROUS
     return _RISK.get(name, DANGEROUS)
+
+
+def precheck(name: str, tool_input: dict) -> None:
+    """
+    Esegue l'eventuale validazione categorica del tool PRIMA della conferma.
+
+    Serve a respingere subito ciò che è sempre vietato (es. la blacklist della
+    shell) senza nemmeno chiedere conferma all'utente. Se il tool non dichiara un
+    pre-check è un no-op: la maggioranza dei tool non ne ha bisogno. Solleva
+    l'eccezione del validatore (es. PermissionError) se l'azione è vietata.
+    """
+    validatore = _PRECHECK.get(name)
+    if validatore is not None:
+        validatore(tool_input)
