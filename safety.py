@@ -13,9 +13,12 @@ Nota progettuale: qui è lecito che il codice parli con l'utente (confirm),
 perché una conferma di sicurezza è un cancello, non "interfaccia" dell'app.
 """
 
+import ipaddress
 import os
 import re
+import socket
 from pathlib import Path
+from urllib.parse import urlparse
 
 from rich.console import Console
 
@@ -24,9 +27,12 @@ console = Console()
 
 # --- Livelli di rischio ------------------------------------------------------
 # Classifichiamo ogni tool in uno di questi tre livelli.
-SAFE = "SAFE"            # sola lettura, nessun effetto collaterale (es. get_system_info)
-CAUTION = "CAUTION"      # modifica qualcosa: scrive file, apre applicazioni
-DANGEROUS = "DANGEROUS"  # cancella, esegue comandi shell arbitrari, usa la rete
+SAFE = "SAFE"            # sola lettura locale, nessun effetto collaterale (es. get_system_info)
+CAUTION = "CAUTION"      # effetto contenuto/reversibile: scrive file, apre app, legge una pagina web (GET con guardiano SSRF)
+DANGEROUS = "DANGEROUS"  # cancella, esegue comandi shell arbitrari, termina processi
+# Nota sulla RETE: una GET in sola lettura passata da ensure_url_sicuro() è CAUTION
+# (nessun effetto distruttivo, host interni bloccati). Resterebbe DANGEROUS solo una
+# rete che SCRIVE/scarica su disco: non c'è ancora, la aggiungeremo con quel rischio.
 
 
 # --- SANDBOX -----------------------------------------------------------------
@@ -103,6 +109,109 @@ def check_blacklist(testo: str) -> None:
     motivo = viola_blacklist(testo)
     if motivo is not None:
         raise PermissionError(f"Azione vietata dalla blacklist: {motivo}")
+
+
+# --- GUARDIANO DI RETE (anti-SSRF) -------------------------------------------
+# La rete è una superficie nuova e insidiosa. Un URL apparentemente innocuo può
+# puntare a servizi INTERNI alla macchina o alla rete locale (localhost, un
+# database, il router) o all'endpoint metadata dei cloud (169.254.169.254), che
+# spesso espone credenziali. Sfruttare l'agente per raggiungerli si chiama SSRF.
+#
+# `ensure_url_sicuro` è il guardiano che i tool web chiamano come PRIMA riga (ed è
+# esposto anche come pre-check, così scatta prima della conferma), esattamente
+# come `ensure_in_sandbox` fa per i file.
+
+# Schemi ammessi: solo il web "vero". Niente file://, ftp://, gopher://, data://...
+_SCHEMI_WEB = {"http", "https"}
+
+
+def _ip_e_vietato(ip: str) -> bool:
+    """
+    True se `ip` NON è un indirizzo pubblico instradabile: loopback, rete privata,
+    link-local (incluso l'endpoint metadata 169.254.169.254), riservato, ecc.
+
+    Ragioniamo sull'IP, non sul nome host, perché il nome è ingannevole:
+    'localhost', '127.0.0.1', '2130706433' (127.0.0.1 in decimale) e un dominio
+    che PUNTA a un IP privato sono tutti modi per colpire la stessa rete interna.
+    """
+    try:
+        # split('%'): togliamo l'eventuale scope-id degli IPv6 link-local (fe80::1%eth0).
+        addr = ipaddress.ip_address(ip.split("%")[0])
+    except ValueError:
+        # Fail closed: un indirizzo che non sappiamo nemmeno interpretare lo blocchiamo.
+        return True
+
+    # Un IPv6 può "mappare" un IPv4 (es. ::ffff:127.0.0.1): controlliamo l'IPv4
+    # sottostante, perché non tutte le versioni di Python propagano is_loopback &
+    # co. all'indirizzo mappato — sarebbe una scorciatoia per aggirarci.
+    mappato = getattr(addr, "ipv4_mapped", None)
+    if mappato is not None:
+        addr = mappato
+
+    return (
+        addr.is_loopback        # 127.0.0.0/8, ::1
+        or addr.is_private      # 10/8, 172.16/12, 192.168/16, fc00::/7 ...
+        or addr.is_link_local   # 169.254.0.0/16 (incl. metadata), fe80::/10
+        or addr.is_reserved     # range IETF riservati
+        or addr.is_unspecified  # 0.0.0.0, ::
+        or addr.is_multicast    # 224.0.0.0/4, ff00::/8
+    )
+
+
+def ensure_url_sicuro(url: str) -> str:
+    """
+    Verifica che `url` sia sicuro da recuperare e ne restituisce la versione pulita.
+
+    - Blocca (PermissionError) gli schemi diversi da http/https e gli host locali
+      o di rete privata (anti-SSRF).
+    - Solleva RuntimeError se l'host non risolve: niente finto successo.
+
+    Da chiamare come PRIMA riga dei tool web e come pre-check nel loop (così un URL
+    vietato è respinto senza nemmeno mostrare la conferma).
+
+    Nota onesta (TOCTOU): risolviamo il nome QUI, e urllib lo ri-risolverà al
+    momento della richiesta; in teoria un DNS malevolo potrebbe rispondere in modo
+    diverso tra i due istanti (DNS rebinding). Blindarlo del tutto richiederebbe di
+    "inchiodare" l'IP dentro la connessione: fuori scopo qui. Il controllo copre
+    comunque tutti i casi concreti (schemi, IP letterali, nomi che puntano a reti interne).
+    """
+    if not url or not url.strip():
+        raise ValueError("URL vuoto: non c'è niente da recuperare.")
+    url = url.strip()
+
+    parsed = urlparse(url)
+
+    # 1. Schema: solo http/https.
+    if parsed.scheme.lower() not in _SCHEMI_WEB:
+        raise PermissionError(
+            f"Schema URL non consentito: '{parsed.scheme or '(nessuno)'}'. "
+            "Sono ammessi solo http e https (rifiutati file, ftp, gopher, data, ...)."
+        )
+
+    # 2. Deve esserci un host.
+    host = parsed.hostname  # già senza porta né eventuale 'utente:password@'
+    if not host:
+        raise PermissionError(f"URL senza host valido: {url!r}")
+
+    # 3. Risolviamo l'host a TUTTI i suoi IP e controlliamo OGNUNO: un solo IP
+    #    privato basta a rifiutare, così un nome con più record non può "nascondere"
+    #    un indirizzo interno dietro uno pubblico.
+    try:
+        info = socket.getaddrinfo(host, parsed.port or None, type=socket.SOCK_STREAM)
+    except socket.gaierror as e:
+        # Host che non risolve (o DNS non disponibile): fail loud, non silenzioso.
+        raise RuntimeError(f"Impossibile risolvere l'host '{host}': {e}")
+
+    for record in info:
+        ip = record[4][0]  # sockaddr: (ip, porta[, flowinfo, scope_id])
+        if _ip_e_vietato(ip):
+            raise PermissionError(
+                f"Host non consentito: '{host}' risolve a un indirizzo privato o "
+                f"locale ({ip}). Per prevenire attacchi SSRF sono bloccati localhost, "
+                "le reti private e l'endpoint metadata (169.254.169.254)."
+            )
+
+    return url
 
 
 # --- CONFERMA ----------------------------------------------------------------
