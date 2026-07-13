@@ -1,5 +1,5 @@
 """
-main.py — Interfaccia a riga di comando (REPL) per Jarvis, Fase 1.
+main.py — Interfaccia a riga di comando (REPL) per Jarvis, Fase 2.
 
 REPL = Read-Eval-Print Loop: leggi input, elabora, stampa, ripeti.
 Questo file NON conosce l'API Anthropic: parla soltanto con la classe Agent.
@@ -15,35 +15,37 @@ from brain import Agent
 console = Console()
 
 
+def _mostra_tool(name: str, tool_input: dict) -> None:
+    """Callback: mostra a schermo quando Jarvis usa un tool (solo estetica)."""
+    console.print(f"[dim]🔧 uso {name}({tool_input})[/]")
+
+
 def main() -> None:
-    # Carica le variabili da un file .env (in particolare ANTHROPIC_API_KEY),
-    # così non dobbiamo esportarle a mano nel terminale ogni volta.
+    # Carica le variabili da un file .env (in particolare ANTHROPIC_API_KEY).
     load_dotenv()
 
     agent = Agent()
 
     console.print(
-        "[bold cyan]Jarvis[/] è attivo (Fase 1). "
-        "Scrivi [bold]esci[/] per terminare.\n"
+        "[bold cyan]Jarvis[/] è attivo (Fase 2). "
+        "Prova: [italic]quanto spazio ho sul disco?[/] — Scrivi [bold]esci[/] per terminare.\n"
     )
 
-    # Il ciclo del REPL: gira finché non decidiamo di uscire.
     while True:
         try:
             user_input = console.input("[bold green]Tu >[/] ").strip()
         except (EOFError, KeyboardInterrupt):
-            # Ctrl-D o Ctrl-C: usciamo in modo pulito senza traceback.
             console.print("\n[dim]Arrivederci.[/]")
             break
 
         if not user_input:
-            continue  # riga vuota: ignora e richiedi input
+            continue
         if user_input.lower() in {"esci", "exit", "quit"}:
             console.print("[dim]Arrivederci.[/]")
             break
 
-        # Deleghiamo tutto il lavoro "intelligente" all'agente.
-        reply = agent.chat(user_input)
+        # Passiamo la callback: così vediamo i tool mentre vengono usati.
+        reply = agent.chat(user_input, on_tool=_mostra_tool)
         console.print(f"[bold cyan]Jarvis >[/] {reply}\n")
 
 

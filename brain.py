@@ -1,75 +1,110 @@
 """
-brain.py — Il cuore di Jarvis (Fase 1: il loop "nudo", senza tool).
+brain.py — Il cuore di Jarvis.
 
-In questa fase Jarvis è ancora solo un chatbot: riceve testo e risponde testo.
-Non ha accesso ad alcuno strumento (arriveranno dalla Fase 2 in poi).
-Qui costruiamo le fondamenta: la gestione della cronologia e la chiamata all'API.
+Fase 2: introduciamo il vero LOOP AGENTICO. Ora Jarvis non solo conversa, ma può
+DECIDERE di usare uno strumento (tool), riceverne il risultato e continuare.
+Regola d'oro: il modello DECIDE, il nostro codice ESEGUE.
 """
 
 from anthropic import Anthropic
 
-# Modello scelto in configurazione: è un identificatore ESATTO dell'API Anthropic.
-# Cambiare questa stringa cambia il "cervello" di Jarvis.
+# SCHEMAS = elenco dei tool da mostrare al modello.
+# dispatch = funzione che, dato un nome, esegue il tool giusto.
+from tools import SCHEMAS, dispatch
+
 MODEL = "claude-sonnet-4-6"
 
-# Il "system prompt" definisce CHI è Jarvis e QUALI limiti ha.
-# Non fa parte della cronologia dei messaggi: è un'istruzione permanente,
-# sempre identica, che il modello riceve a ogni singola chiamata.
 SYSTEM_PROMPT = """Sei Jarvis, un assistente personale che gira sul computer dell'utente.
 Parli in italiano, in modo diretto e conciso.
 
-Al momento (Fase 1) NON hai ancora accesso ad alcuno strumento: non puoi leggere file,
-eseguire comandi, aprire applicazioni o navigare sul web. Se ti viene chiesta un'azione
-sul sistema, spiega con onestà che in questa fase puoi soltanto conversare e che le
-capacità operative verranno aggiunte nelle fasi successive.
+Hai a disposizione lo strumento `get_system_info`, che ti fornisce dati REALI sul
+computer (sistema operativo, ora, spazio su disco, batteria). Usalo quando l'utente
+chiede queste informazioni, invece di rispondere a memoria o inventarle.
 
+Altre azioni (leggere/scrivere file, eseguire comandi, aprire applicazioni, navigare
+sul web) non sono ancora disponibili: verranno aggiunte nelle fasi successive.
 Non fingere mai di aver eseguito un'azione che non puoi eseguire."""
 
 
 class Agent:
     """
-    L'agente conversazionale di Jarvis.
+    L'agente di Jarvis.
 
-    Responsabilità in Fase 1:
-      - tenere la cronologia della conversazione (self.messages)
-      - inviare la cronologia all'API Anthropic e restituire la risposta
+    Responsabilità in Fase 2:
+      - tenere la cronologia (self.messages)
+      - eseguire il loop agentico: chiama l'API, se il modello chiede un tool
+        lo esegue e gli rimanda il risultato, finché non arriva la risposta finale.
     """
 
     def __init__(self) -> None:
-        # Il client legge automaticamente la chiave dalla variabile
-        # d'ambiente ANTHROPIC_API_KEY: non la scriviamo mai nel codice.
-        self.client = Anthropic()
-
-        # La cronologia: una lista di dict con forma {"role": ..., "content": ...}.
-        # 'role' vale "user" (noi) oppure "assistant" (Jarvis).
-        # ATTENZIONE: il system prompt NON va qui dentro, ha un parametro a parte.
+        self.client = Anthropic()  # legge la chiave da ANTHROPIC_API_KEY
         self.messages: list[dict] = []
 
-    def chat(self, user_input: str) -> str:
-        """Aggiunge il messaggio utente, chiama l'API, salva e restituisce la risposta."""
+    def chat(self, user_input: str, on_tool=None) -> str:
+        """
+        Gestisce un turno completo dell'utente, tool inclusi.
 
-        # 1) Aggiungiamo il nostro messaggio in fondo alla cronologia.
+        `on_tool` è una funzione opzionale chiamata quando Jarvis usa un tool
+        (serve solo a mostrarlo a schermo): brain.py NON stampa nulla di suo.
+        """
+        # Aggiungiamo il messaggio dell'utente alla cronologia.
         self.messages.append({"role": "user", "content": user_input})
 
-        # 2) Chiamiamo l'API inviando OGNI VOLTA l'intera cronologia.
-        #    Il modello è "stateless" (senza memoria propria fra le chiamate):
-        #    se non gli rimandiamo il passato, per lui quel passato non esiste.
-        response = self.client.messages.create(
-            model=MODEL,
-            max_tokens=2048,          # tetto massimo di token della risposta
-            system=SYSTEM_PROMPT,     # identità e limiti, sempre uguali
-            messages=self.messages,   # tutta la conversazione fin qui
-        )
+        # --- IL LOOP AGENTICO -------------------------------------------------
+        # Ripete finché il modello NON chiede più tool. Può fare più giri!
+        while True:
+            response = self.client.messages.create(
+                model=MODEL,
+                max_tokens=2048,
+                system=SYSTEM_PROMPT,
+                messages=self.messages,
+                tools=SCHEMAS,          # <- diciamo al modello quali tool esistono
+            )
 
-        # 3) La risposta arriva come lista di "blocchi" di contenuto. In Fase 1
-        #    (senza tool) c'è un solo blocco di tipo "text": ne uniamo il testo.
-        reply = "".join(
-            block.text for block in response.content if block.type == "text"
-        )
+            # Salviamo SEMPRE il turno dell'assistant così com'è: può contenere sia
+            # blocchi di testo sia blocchi 'tool_use'. Ci serve integro perché i
+            # tool_result che invieremo dopo devono riferirsi ai loro 'id'.
+            self.messages.append({"role": "assistant", "content": response.content})
 
-        # 4) Salviamo la risposta di Jarvis nella cronologia: così, al turno
-        #    successivo, quando rimanderemo tutto, il modello "ricorderà"
-        #    anche ciò che ha detto lui stesso.
-        self.messages.append({"role": "assistant", "content": reply})
+            # stop_reason spiega PERCHÉ il modello si è fermato:
+            #   "end_turn"  -> ha finito: ha una risposta pronta per l'utente
+            #   "tool_use"  -> vuole che eseguiamo uno o più tool prima di continuare
+            #   (esistono altri valori, es. "max_tokens", ma qui ci bastano questi)
+            if response.stop_reason != "tool_use":
+                # Nessun tool richiesto: estraiamo il testo e chiudiamo il turno.
+                return "".join(
+                    b.text for b in response.content if b.type == "text"
+                )
 
-        return reply
+            # Il modello ha chiesto uno o PIÙ tool nello stesso turno: li eseguiamo tutti.
+            tool_results = []
+            for block in response.content:
+                if block.type != "tool_use":
+                    continue  # ignoriamo eventuali blocchi di testo qui
+
+                if on_tool is not None:
+                    on_tool(block.name, block.input)
+
+                # Fail loud: se il tool fallisce, NON nascondiamo l'errore.
+                # Lo rimandiamo al modello come osservazione, così può correggersi.
+                try:
+                    result = dispatch(block.name, block.input)
+                    is_error = False
+                except Exception as e:
+                    result = f"Errore durante l'esecuzione del tool: {e}"
+                    is_error = True
+
+                tool_results.append({
+                    "type": "tool_result",
+                    # tool_use_id DEVE combaciare con block.id del 'tool_use':
+                    # è così che il modello riconosce a quale richiesta appartiene
+                    # ciascun risultato (potrebbero essercene più d'uno in parallelo).
+                    "tool_use_id": block.id,
+                    "content": result,
+                    "is_error": is_error,
+                })
+
+            # I risultati dei tool si inviano come messaggio con ruolo 'user'.
+            self.messages.append({"role": "user", "content": tool_results})
+            # ...e il while RIPETE: il modello legge i risultati e decide il passo
+            # successivo (un altro tool, oppure finalmente la risposta all'utente).
