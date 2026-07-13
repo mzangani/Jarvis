@@ -6,6 +6,7 @@ lista `TOOLS` di coppie (schema, funzione). Questo file aggrega tutte le famigli
 in due oggetti comodi per brain.py:
 
   - SCHEMAS: la lista di schemi da passare all'API (dice al modello quali tool esistono)
+  - SERVER_TOOLS: i tool "server-side" (eseguiti da Anthropic, es. web_search)
   - dispatch(name, input): esegue il tool giusto dato il nome scelto dal modello
 """
 
@@ -17,6 +18,7 @@ _MODULI = [system, files, shell, web]
 # Costruiamo il "registro": schema per l'API + mappa nome -> funzione + mappa
 # nome -> rischio + mappa nome -> pre-check (validazione categorica prima della conferma).
 SCHEMAS: list[dict] = []
+SERVER_TOOLS: list[dict] = []
 _IMPL: dict = {}
 _RISK: dict = {}
 _PRECHECK: dict = {}
@@ -29,6 +31,11 @@ for _mod in _MODULI:
     # Le famiglie possono opzionalmente dichiarare PRECHECKS (nome -> validatore).
     # getattr con default {}: chi non lo dichiara non ha pre-check, ed è normale.
     _PRECHECK.update(getattr(_mod, "PRECHECKS", {}))
+    # ...e possono dichiarare SERVER_TOOLS: tool eseguiti da Anthropic (non da noi),
+    # come il web search. Li raccogliamo a parte e li concateneremo agli SCHEMAS solo
+    # al momento della chiamata API. NON entrano in _IMPL/_RISK/_PRECHECK: dispatch,
+    # risk_of e precheck non li vedono nemmeno, perché non li eseguiamo noi.
+    SERVER_TOOLS.extend(getattr(_mod, "SERVER_TOOLS", []))
 
 
 def dispatch(name: str, tool_input: dict) -> str:
