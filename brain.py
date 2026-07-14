@@ -7,10 +7,12 @@ Regola d'oro: il modello DECIDE, il nostro codice ESEGUE.
 """
 
 import sqlite3
+import time  # per misurare la durata di esecuzione dei tool (time.monotonic)
 
 from anthropic import Anthropic, AnthropicError
 
 import history  # memoria BREVE (Fase 5b): compattazione della cronologia
+import logger  # tracciamento (Fase 7a): ogni tool call su file JSONL, per osservabilità
 import memory  # memoria LUNGA persistente (Fase 5a): fatti su SQLite
 import safety
 # SCHEMAS      = elenco dei NOSTRI tool da mostrare al modello (li eseguiamo noi).
@@ -285,6 +287,11 @@ class Agent:
                 if on_tool is not None:
                     on_tool(block.name, block.input)
 
+                # Rischio del tool: ci serve sia per il cancello di conferma sia per
+                # tracciarlo nel log a OGNI esito (anche i rifiuti). Lo calcoliamo qui
+                # una volta, prima dei cancelli.
+                rischio = risk_of(block.name)
+
                 # CANCELLO 0: validazione categorica PRIMA della conferma. Alcune
                 # azioni sono SEMPRE vietate (es. la blacklist della shell): le
                 # respingiamo subito, senza nemmeno mostrare il prompt di conferma.
@@ -293,38 +300,58 @@ class Agent:
                 try:
                     precheck(block.name, block.input)
                 except Exception as e:
+                    rifiuto = f"Azione rifiutata: {e}"
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,
-                        "content": f"Azione rifiutata: {e}",
+                        "content": rifiuto,
                         "is_error": True,
                     })
+                    # LOG (osservabilità): rifiutato dal precheck. Il tool non è mai
+                    # partito -> durata 0; nel log is_error=False (lì è True solo quando
+                    # il tool viene ESEGUITO e fallisce). Il perché sta in `output`.
+                    logger.log_tool_call(
+                        tool=block.name, tool_input=block.input, output=rifiuto,
+                        esito="rifiutato", is_error=False, durata_ms=0.0, rischio=rischio,
+                    )
                     continue
 
                 # CANCELLO DI SICUREZZA: se l'azione non è SAFE, chiediamo conferma
                 # esplicita PRIMA di eseguire. Se l'utente rifiuta, non eseguiamo e
                 # rimandiamo al modello un tool_result che glielo comunica (così può
                 # proporre un'alternativa invece di bloccarsi).
-                rischio = risk_of(block.name)
                 if rischio != safety.SAFE and not safety.confirm(
                     block.name, block.input, rischio
                 ):
+                    rifiuto = "L'utente ha rifiutato l'esecuzione di questa azione."
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,
-                        "content": "L'utente ha rifiutato l'esecuzione di questa azione.",
+                        "content": rifiuto,
                         "is_error": False,
                     })
+                    # LOG: rifiutato dall'utente alla conferma. Durata 0 (non eseguito):
+                    # NON misuriamo attorno a confirm(), che include il tempo di
+                    # riflessione dell'utente e falserebbe la durata del tool.
+                    logger.log_tool_call(
+                        tool=block.name, tool_input=block.input, output=rifiuto,
+                        esito="rifiutato", is_error=False, durata_ms=0.0, rischio=rischio,
+                    )
                     continue
 
                 # Fail loud: se il tool fallisce, NON nascondiamo l'errore.
                 # Lo rimandiamo al modello come osservazione, così può correggersi.
+                # time.monotonic() è un orologio monotòno (non torna indietro se cambia
+                # l'ora di sistema): giusto per misurare una durata. Misuriamo SOLO
+                # attorno a dispatch(), cioè l'esecuzione vera del tool.
+                t0 = time.monotonic()
                 try:
                     result = dispatch(block.name, block.input)
                     is_error = False
                 except Exception as e:
                     result = f"Errore durante l'esecuzione del tool: {e}"
                     is_error = True
+                durata_ms = (time.monotonic() - t0) * 1000
 
                 tool_results.append({
                     "type": "tool_result",
@@ -335,6 +362,13 @@ class Agent:
                     "content": result,
                     "is_error": is_error,
                 })
+                # LOG: esito dell'esecuzione vera. "ok"/"errore" a seconda che il tool
+                # abbia sollevato; durata reale misurata sopra.
+                logger.log_tool_call(
+                    tool=block.name, tool_input=block.input, output=result,
+                    esito="errore" if is_error else "ok", is_error=is_error,
+                    durata_ms=durata_ms, rischio=rischio,
+                )
 
             # I risultati dei tool si inviano come messaggio con ruolo 'user'.
             self.messages.append({"role": "user", "content": tool_results})
