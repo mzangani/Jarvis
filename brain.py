@@ -6,10 +6,27 @@ DECIDERE di usare uno strumento (tool), riceverne il risultato e continuare.
 Regola d'oro: il modello DECIDE, il nostro codice ESEGUE.
 """
 
+import os  # per leggere la configurazione del retry/timeout dalle variabili d'ambiente
 import sqlite3
 import time  # per misurare la durata di esecuzione dei tool (time.monotonic)
 
-from anthropic import Anthropic, AnthropicError
+# AnthropicError è la BASE di tutti gli errori dell'SDK; i sottotipi qui sotto ci
+# servono per CLASSIFICARE un guasto (transitorio vs permanente) e dare un messaggio
+# mirato (Fase 7b). Sono tutti esposti dal package `anthropic` (0.116.0).
+from anthropic import (
+    Anthropic,
+    AnthropicError,
+    APIStatusError,  # base di tutti gli errori con uno status HTTP; espone .status_code
+    APIConnectionError,  # rete non raggiungibile o timeout (APITimeoutError ne è sottoclasse)
+    AuthenticationError,  # 401: chiave errata/assente -> è PERMANENTE
+    BadRequestError,  # 400: richiesta malformata -> PERMANENTE
+    InternalServerError,  # 5xx generico -> transitorio
+    NotFoundError,  # 404: es. nome del modello sbagliato -> PERMANENTE
+    OverloadedError,  # 529: server sovraccarichi -> transitorio
+    PermissionDeniedError,  # 403: non autorizzato -> PERMANENTE
+    RateLimitError,  # 429: troppe richieste -> transitorio
+    RequestTooLargeError,  # 413: richiesta troppo grande -> PERMANENTE
+)
 
 import history  # memoria BREVE (Fase 5b): compattazione della cronologia
 import logger  # tracciamento (Fase 7a): ogni tool call su file JSONL, per osservabilità
@@ -23,6 +40,63 @@ import safety
 from tools import SCHEMAS, SERVER_TOOLS, dispatch, risk_of, precheck
 
 MODEL = "claude-sonnet-4-6"
+
+# --- Robustezza delle chiamate API (Fase 7b) --------------------------------------
+# L'SDK `anthropic` RITENTA GIÀ da solo gli errori TRANSITORI (connessione/timeout,
+# 429 rate limit, ≥500 incl. 529 overload) con backoff esponenziale + jitter e
+# rispettando l'header retry-after. Quindi NON scriviamo un loop di retry a mano
+# (duplicherebbe l'SDK, si accavallerebbe al suo backoff e rischierebbe di ritentare
+# ciò che non va ritentato): ci limitiamo a CONFIGURARLO sul client.
+
+
+def _leggi_int_env(nome: str, default: int, minimo: int) -> int:
+    """
+    Legge un intero da una variabile d'ambiente, validandolo FAIL LOUD ma in modo
+    leggibile. Un valore malformato o sotto il minimo è un errore di configurazione
+    dell'utente: meglio fermarsi subito con un messaggio chiaro che partire con un
+    client rotto (o mostrare un traceback grezzo di int()).
+    """
+    grezzo = os.environ.get(nome)
+    if grezzo is None:
+        return default
+    try:
+        valore = int(grezzo)
+    except ValueError:
+        # 'from None' nasconde il traceback interno di int(): il messaggio nostro basta.
+        raise ValueError(f"{nome} deve essere un intero, ricevuto {grezzo!r}.") from None
+    if valore < minimo:
+        raise ValueError(f"{nome} deve essere >= {minimo}, ricevuto {valore}.")
+    return valore
+
+
+def _leggi_timeout_env(nome: str) -> float | None:
+    """
+    Legge il timeout (in secondi) da env: None se la variabile non è impostata (così NON
+    passiamo `timeout` al costruttore e resta il default dell'SDK). Un valore non numerico
+    o <= 0 è un errore: 0/negativo darebbe un client che va SEMPRE in timeout — un guasto
+    SILENZIOSO — quindi lo respingiamo LOUD. NB: non usiamo la "truthiness" della stringa
+    ('0' sarebbe truthy): distinguiamo davvero "non impostato" da "valore esplicito".
+    """
+    grezzo = os.environ.get(nome)
+    if grezzo is None:
+        return None
+    try:
+        valore = float(grezzo)
+    except ValueError:
+        raise ValueError(f"{nome} deve essere un numero di secondi, ricevuto {grezzo!r}.") from None
+    if valore <= 0:
+        raise ValueError(f"{nome} deve essere > 0 secondi, ricevuto {valore}.")
+    return valore
+
+
+# Numero massimo di ritentativi automatici dell'SDK sugli errori transitori (>= 0).
+# Default alzato da 2 (default SDK) a 4: assorbe qualche blip di rete/overload in più
+# senza disturbare l'utente. Più alto = più resistenza ai guasti passeggeri, ma anche
+# attesa più lunga prima di arrenderci quando l'API è davvero giù.
+_API_RETRIES = _leggi_int_env("JARVIS_API_RETRIES", default=4, minimo=0)
+
+# Timeout (secondi) sull'intera richiesta HTTP. None = non impostato -> default SDK.
+_API_TIMEOUT = _leggi_timeout_env("JARVIS_API_TIMEOUT")
 
 # Quante volte, in un singolo turno, accettiamo di "riprendere" un tool server-side
 # fermatosi con stop_reason == "pause_turn" (vedi il loop). È una guardia anti-loop:
@@ -80,6 +154,70 @@ il compito in corso e le questioni ancora aperte, e i risultati importanti degli
 strumenti usati. Non inventare nulla e non aggiungere commenti fuori dal riassunto."""
 
 
+def descrivi_errore_api(errore: AnthropicError) -> str:
+    """
+    Traduce un errore dell'SDK `anthropic` in un messaggio LEGGIBILE in italiano.
+
+    È una funzione PURA (nessuna rete, nessuno stato): le passi un errore, ti restituisce
+    una stringa. Per questo è testabile senza connessione (basta costruirle un finto
+    errore) pur restando in brain.py, dove vive il client.
+
+    Distinzione chiave della Fase 7b:
+      - TRANSITORI: l'SDK li ha GIÀ ritentati (con backoff); se arrivano fin qui i
+        tentativi sono esauriti -> messaggio "problema temporaneo, riprova".
+      - PERMANENTI: ritentare non aiuterebbe -> messaggio mirato su cosa correggere.
+    Fail closed: un errore che NON sappiamo classificare finisce nel ramo finale
+    ("non riprovo, ecco cos'è"): meglio avvisare che fingere di sapere.
+
+    Nota sull'ordine: in pratica quasi tutte queste classi sono "sorelle" (sotto
+    APIStatusError), quindi l'ordine tra loro non cambia il risultato; l'unica gerarchia
+    reale è APITimeoutError <: APIConnectionError, coperta testando APIConnectionError.
+    L'ordine resta comunque difensivo (se in futuro una classe diventasse sottotipo di
+    un'altra restiamo corretti) e va dal più specifico al più generico.
+    """
+    # --- PERMANENTI: nessun retry avrebbe aiutato, l'utente deve correggere qualcosa ---
+    if isinstance(errore, AuthenticationError):  # 401
+        return (
+            "autenticazione fallita (401): controlla che ANTHROPIC_API_KEY sia "
+            "corretta, attiva e con credito."
+        )
+    if isinstance(errore, PermissionDeniedError):  # 403
+        return "permesso negato dall'API (403): la chiave non è autorizzata a questa operazione."
+    if isinstance(errore, RequestTooLargeError):  # 413
+        return (
+            "richiesta troppo grande (413): la conversazione è troppo lunga. "
+            "Prova a ripartire o ad alleggerire il contesto."
+        )
+    if isinstance(errore, NotFoundError):  # 404
+        return f"risorsa non trovata (404): forse il nome del modello '{MODEL}' non è più valido."
+    if isinstance(errore, BadRequestError):  # 400
+        return f"richiesta rifiutata dall'API (400, malformata): {errore}"
+    # --- TRANSITORI: già ritentati dall'SDK, invano; ha senso solo riprovare più tardi ---
+    if isinstance(errore, RateLimitError):  # 429
+        return "troppe richieste (rate limit 429): aspetta un momento e riprova."
+    if isinstance(errore, OverloadedError):  # 529
+        return "i server di Anthropic sono sovraccarichi (529): riprova tra poco."
+    if isinstance(errore, APIConnectionError):  # rete giù o timeout (incl. APITimeoutError)
+        return (
+            "non riesco a raggiungere l'API (rete non disponibile o timeout): "
+            "controlla la connessione e riprova."
+        )
+    if isinstance(errore, InternalServerError):  # altri 5xx
+        return "errore temporaneo del server API (5xx): riprova tra poco."
+    # --- ALTRI errori con uno status HTTP non trattato sopra: classifichiamo per CODICE.
+    #     Così i transitori che l'SDK ritenta (408 timeout, 409 lock, eventuali 5xx senza
+    #     classe dedicata) NON finiscono nel fallback "imprevisto" col consiglio sbagliato,
+    #     e i 4xx restanti (es. 422 non elaborabile) restano permanenti con un messaggio. ---
+    if isinstance(errore, APIStatusError):
+        code = errore.status_code
+        if code in (408, 409) or (code is not None and code >= 500):
+            return f"problema temporaneo del server API (codice {code}): riprova tra poco."
+        return f"richiesta rifiutata dall'API (codice {code}): {errore}"
+    # --- FALLBACK (fail closed): AnthropicError SENZA status HTTP (es. errori di
+    #     validazione della risposta) che non rientrano in nessun caso sopra ---
+    return f"errore imprevisto dell'API ({type(errore).__name__}): {errore}"
+
+
 class Agent:
     """
     L'agente di Jarvis.
@@ -91,7 +229,14 @@ class Agent:
     """
 
     def __init__(self) -> None:
-        self.client = Anthropic()  # legge la chiave da ANTHROPIC_API_KEY
+        # Configuriamo il RETRY NATIVO dell'SDK (Fase 7b): max_retries governa quante
+        # volte l'SDK ritenta AUTOMATICAMENTE gli errori transitori. Il timeout lo
+        # passiamo SOLO se impostato via env: altrimenti lasciamo il default dell'SDK
+        # (passare timeout=None significherebbe "nessun timeout", non ciò che vogliamo).
+        opzioni_client = {"max_retries": _API_RETRIES}
+        if _API_TIMEOUT is not None:
+            opzioni_client["timeout"] = _API_TIMEOUT
+        self.client = Anthropic(**opzioni_client)  # legge la chiave da ANTHROPIC_API_KEY
         self.messages: list[dict] = []
         # Quanti token di INPUT ha usato l'ultima chiamata all'API in questo turno.
         # È il segnale (gratis, incluso in ogni risposta) per decidere se compattare
@@ -181,8 +326,14 @@ class Agent:
             # except MIRATO e motivato: se la chiamata di riassunto fallisce NON
             # lasciamo crescere il contesto all'infinito -> ripieghiamo sul TRONCAMENTO
             # (perdiamo il vecchio, ma restiamo entro i limiti) e lo dichiariamo.
+            # Anche qui l'SDK ha già ritentato i guasti transitori; riusiamo la stessa
+            # classificazione della Fase 7b per una nota leggibile (nessun doppione:
+            # questo ramo NON crasha e NON propaga, ripiega e basta).
             riassunto = None
-            nota = f"riassunto non riuscito ({e}); ho troncato la parte vecchia della cronologia"
+            nota = (
+                "riassunto non riuscito (" + descrivi_errore_api(e)
+                + "); ho troncato la parte vecchia della cronologia"
+            )
         else:
             if not riassunto:
                 # Riassunto vuoto: stesso ripiego, senza fingere di aver conservato il contesto.
@@ -201,8 +352,18 @@ class Agent:
 
         `on_tool` è una funzione opzionale chiamata quando Jarvis usa un tool
         (serve solo a mostrarlo a schermo): brain.py NON stampa nulla di suo.
+
+        Fase 7b — COERENZA DELLA CRONOLOGIA. Fotografiamo la lunghezza di self.messages
+        PRIMA di aggiungere alcunché (checkpoint). Se QUALSIASI cosa va storta a metà
+        turno, ripristiniamo self.messages a quel punto (del ...[checkpoint:]): il turno
+        fallito sparisce del tutto e il successivo riparte da uno stato VALIDO (l'ultimo
+        messaggio è un assistant di fine turno, oppure la lista è vuota), senza mai un
+        blocco tool_use rimasto senza il suo tool_result. Il rollback protegge l'INTERO
+        turno, non solo la chiamata all'API: anche un EOFError da confirm(), un OSError
+        dal logger o la RuntimeError della guardia pause_turn lascerebbero, altrimenti,
+        una cronologia spezzata che farebbe fallire OGNI turno futuro.
         """
-        # Aggiungiamo il messaggio dell'utente alla cronologia.
+        checkpoint = len(self.messages)
         self.messages.append({"role": "user", "content": user_input})
 
         # System prompt DINAMICO: base + fatti ricordati. Lo calcoliamo una volta per
@@ -210,6 +371,42 @@ class Agent:
         # 'ricorda' è già visibile al modello via il suo tool_result).
         system = self._costruisci_system()
 
+        try:
+            risposta_finale = self._loop_agentico(system, on_tool, on_note)
+        except AnthropicError as e:
+            # GRACEFUL DEGRADATION: l'API ha fallito anche dopo i retry dell'SDK (o è un
+            # errore permanente). Non propaghiamo (ucciderebbe la REPL): ripuliamo il
+            # turno e restituiamo un messaggio leggibile.
+            del self.messages[checkpoint:]
+            descrizione = descrivi_errore_api(e)
+            # Visibilità (decisione 5): l'evento come NOTA interna via on_note (brain.py
+            # non stampa; è main.py a mostrarla). Tersa: la spiegazione completa sta nella
+            # stringa restituita, per non ripetere due volte lo stesso testo.
+            if on_note is not None:
+                on_note(f"chiamata all'API non riuscita, turno annullato ({type(e).__name__})")
+            return "Non sono riuscito a rispondere: " + descrizione
+        except BaseException:
+            # QUALSIASI altro guasto a metà turno (EOFError da una conferma, OSError dal
+            # logger, la RuntimeError della guardia pause_turn, un Ctrl-C...): NON lo
+            # inghiottiamo — fail loud — ma prima ripristiniamo la cronologia coerente,
+            # così il turno successivo non eredita un tool_use spaiato; poi rilanciamo.
+            # La rete di sicurezza in main.py mostrerà l'errore e terrà viva la REPL.
+            del self.messages[checkpoint:]
+            raise
+
+        # Turno concluso con successo. Prima di restituire, valutiamo se la cronologia è
+        # cresciuta troppo e va compattata: alleggerisce i turni futuri senza cambiare
+        # la risposta di questo.
+        self._compatta_se_serve(on_note)
+        return risposta_finale
+
+    def _loop_agentico(self, system: str, on_tool=None, on_note=None) -> str:
+        """
+        Il LOOP AGENTICO vero e proprio: chiama l'API e, finché il modello chiede tool,
+        li esegue e gli rimanda i risultati; ritorna il testo finale quando il modello ha
+        finito. NON gestisce qui i guasti: lascia PROPAGARE le eccezioni a chat(), che
+        possiede il checkpoint e ripristina la cronologia in modo coerente (Fase 7b).
+        """
         # Contatore delle "riprese" dei tool server-side in questo turno (vedi
         # pause_turn più sotto). Serve solo come guardia anti-loop.
         riprese_pause = 0
@@ -217,6 +414,10 @@ class Agent:
         # --- IL LOOP AGENTICO -------------------------------------------------
         # Ripete finché il modello NON chiede più tool. Può fare più giri!
         while True:
+            # La chiamata al modello è il punto in cui l'API può fallire (rete giù, rate
+            # limit, overload, chiave errata...). L'SDK ha GIÀ ritentato da solo i guasti
+            # transitori (vedi _API_RETRIES); se solleva comunque, l'eccezione risale a
+            # chat() che la traduce in un messaggio leggibile senza crashare.
             response = self.client.messages.create(
                 model=MODEL,
                 max_tokens=2048,
@@ -264,19 +465,36 @@ class Agent:
                     )
                 continue
 
+            # MAX_TOKENS: la risposta ha raggiunto il tetto di max_tokens ed è TRONCATA.
+            # Va gestito PRIMA del ramo "risposta finale" qui sotto, perché:
+            #   - se il modello è stato troncato MENTRE generava un tool_use, quel blocco
+            #     resta senza tool_result: la cronologia sarebbe spezzata e OGNI turno
+            #     successivo fallirebbe (tool_use spaiato). Non possiamo completarlo:
+            #     sollevo, così chat() fa il rollback dell'INTERO turno e la cronologia
+            #     resta valida (l'assistant troncato viene scartato con tutto il resto).
+            #   - se invece è solo testo, è una risposta parziale ma coerente: la
+            #     restituiamo avvisando via on_note che è incompleta.
+            if response.stop_reason == "max_tokens":
+                if any(b.type == "tool_use" for b in response.content):
+                    raise RuntimeError(
+                        "La risposta è stata troncata (max_tokens) mentre preparavo "
+                        "un'azione: non posso completarla. Riprova con una richiesta più "
+                        "breve o suddivisa in più passi."
+                    )
+                if on_note is not None:
+                    on_note("risposta troncata per lunghezza (max_tokens): potrebbe essere incompleta")
+                return "".join(b.text for b in response.content if b.type == "text")
+
             # stop_reason spiega PERCHÉ il modello si è fermato:
             #   "end_turn"  -> ha finito: ha una risposta pronta per l'utente
             #   "tool_use"  -> vuole che eseguiamo uno o più tool prima di continuare
             #   "pause_turn"-> gestito sopra (tool server-side da riprendere)
-            #   (esistono altri valori, es. "max_tokens", ma qui ci bastano questi)
+            #   "max_tokens"-> gestito sopra (risposta troncata)
             if response.stop_reason != "tool_use":
-                # Nessun NOSTRO tool richiesto: estraiamo il testo e usciamo dal loop.
-                # Non restituiamo subito: prima (dopo il while) valutiamo se compattare
-                # la cronologia, così il turno SUCCESSIVO parte più leggero.
-                risposta_finale = "".join(
-                    b.text for b in response.content if b.type == "text"
-                )
-                break
+                # Nessun NOSTRO tool richiesto: estraiamo il testo e chiudiamo il loop.
+                # Ritorniamo il testo a chat(), che poi deciderà se compattare la
+                # cronologia (così il turno SUCCESSIVO parte più leggero).
+                return "".join(b.text for b in response.content if b.type == "text")
 
             # Il modello ha chiesto uno o PIÙ tool nello stesso turno: li eseguiamo tutti.
             tool_results = []
@@ -374,10 +592,3 @@ class Agent:
             self.messages.append({"role": "user", "content": tool_results})
             # ...e il while RIPETE: il modello legge i risultati e decide il passo
             # successivo (un altro tool, oppure finalmente la risposta all'utente).
-
-        # --- FINE TURNO ------------------------------------------------------
-        # Il turno è concluso (siamo usciti dal loop con break). Prima di restituire,
-        # valutiamo se la cronologia è cresciuta troppo e va compattata: alleggerisce
-        # i turni futuri senza cambiare la risposta di questo.
-        self._compatta_se_serve(on_note)
-        return risposta_finale
