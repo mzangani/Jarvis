@@ -10,10 +10,10 @@ in due oggetti comodi per brain.py:
   - dispatch(name, input): esegue il tool giusto dato il nome scelto dal modello
 """
 
-from . import files, system, shell, web
+from . import files, system, shell, web, memory
 
 # Elenco dei moduli-famiglia. Ogni famiglia espone TOOLS (e opzionalmente PRECHECKS).
-_MODULI = [system, files, shell, web]
+_MODULI = [system, files, shell, web, memory]
 
 # Costruiamo il "registro": schema per l'API + mappa nome -> funzione + mappa
 # nome -> rischio + mappa nome -> pre-check (validazione categorica prima della conferma).

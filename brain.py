@@ -6,8 +6,11 @@ DECIDERE di usare uno strumento (tool), riceverne il risultato e continuare.
 Regola d'oro: il modello DECIDE, il nostro codice ESEGUE.
 """
 
+import sqlite3
+
 from anthropic import Anthropic
 
+import memory  # memoria LUNGA persistente (Fase 5a): fatti su SQLite
 import safety
 # SCHEMAS      = elenco dei NOSTRI tool da mostrare al modello (li eseguiamo noi).
 # SERVER_TOOLS = tool "server-side" eseguiti da Anthropic (es. web_search): li
@@ -49,6 +52,12 @@ rispondere, usali invece di rispondere a memoria o di inventare:
   il flusso naturale è: prima cerchi, poi (se serve) leggi una delle fonti trovate.
   Nota onesta: la ricerca invia la richiesta in rete (ad Anthropic e al motore di
   ricerca) e ha un piccolo costo per ogni ricerca.
+- Memoria: puoi RICORDARE fatti persistenti sull'utente (ricorda) e RICHIAMARLI
+  quando servono (richiama). Usa 'ricorda' quando l'utente ti comunica un'informazione
+  durevole (dove tiene i progetti, come si chiama, una preferenza stabile). I fatti
+  più recenti che ricordi sono già elencati qui sotto nel blocco "Cose che ricordi
+  sull'utente", quando presente: usa 'richiama' per cercare il resto. Il richiamo è
+  per parole chiave, non semantico: non capisce i sinonimi, cerca le parole.
 
 Alcune azioni che modificano il sistema o i file chiedono conferma all'utente
 prima di essere eseguite: se l'utente rifiuta, riceverai un risultato che te lo
@@ -72,6 +81,41 @@ class Agent:
         self.client = Anthropic()  # legge la chiave da ANTHROPIC_API_KEY
         self.messages: list[dict] = []
 
+    def _costruisci_system(self) -> str:
+        """
+        Costruisce il system prompt DINAMICO: SYSTEM_PROMPT base + un blocco con i
+        fatti che Jarvis ricorda (memoria LUNGA). Lo ricostruiamo a ogni turno, così
+        un fatto appena imparato con 'ricorda' compare già dal turno successivo, senza
+        dover riavviare. È una query SQLite banale: il costo è trascurabile.
+
+        Iniezione + richiamo insieme = RAG semplificato: i fatti recenti sono già nel
+        contesto (iniettati), il resto resta recuperabile su richiesta con 'richiama'.
+        """
+        try:
+            fatti = memory.fatti_recenti()
+        except (sqlite3.Error, OSError) as e:
+            # except MIRATO e motivato: la memoria è un "di più". Se il suo disco è
+            # rotto o non scrivibile NON facciamo crashare l'intero assistente, e NON
+            # inventiamo fatti: lo dichiariamo apertamente nel prompt (loud) e andiamo
+            # avanti a conversare. (Se l'utente prova comunque 'ricorda'/'richiama',
+            # quei tool falliranno LOUD per conto loro, via il tool_result del loop.)
+            return (
+                SYSTEM_PROMPT
+                + "\n\n[Nota: la memoria persistente non è al momento disponibile "
+                f"({e}). Puoi conversare, ma non posso salvare né richiamare fatti.]"
+            )
+
+        if not fatti:
+            return SYSTEM_PROMPT  # nessun fatto ancora: prompt base, senza blocco vuoto
+
+        righe = "\n".join(f"- {f}" for f in fatti)
+        return (
+            SYSTEM_PROMPT
+            + "\n\nCose che ricordi sull'utente (dalla memoria persistente; usa il "
+            "tool 'richiama' se ti serve qualcosa che non è elencato qui):\n"
+            + righe
+        )
+
     def chat(self, user_input: str, on_tool=None) -> str:
         """
         Gestisce un turno completo dell'utente, tool inclusi.
@@ -81,6 +125,11 @@ class Agent:
         """
         # Aggiungiamo il messaggio dell'utente alla cronologia.
         self.messages.append({"role": "user", "content": user_input})
+
+        # System prompt DINAMICO: base + fatti ricordati. Lo calcoliamo una volta per
+        # turno (non serve rifarlo a ogni giro del loop interno: nello stesso turno un
+        # 'ricorda' è già visibile al modello via il suo tool_result).
+        system = self._costruisci_system()
 
         # Contatore delle "riprese" dei tool server-side in questo turno (vedi
         # pause_turn più sotto). Serve solo come guardia anti-loop.
@@ -92,7 +141,7 @@ class Agent:
             response = self.client.messages.create(
                 model=MODEL,
                 max_tokens=2048,
-                system=SYSTEM_PROMPT,
+                system=system,  # dinamico: base + fatti ricordati (vedi _costruisci_system)
                 messages=self.messages,
                 # SCHEMAS = i nostri tool (li eseguiamo noi). SERVER_TOOLS = i tool
                 # nativi eseguiti da Anthropic (es. web_search): li dichiariamo qui,
