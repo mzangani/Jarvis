@@ -8,8 +8,9 @@ Regola d'oro: il modello DECIDE, il nostro codice ESEGUE.
 
 import sqlite3
 
-from anthropic import Anthropic
+from anthropic import Anthropic, AnthropicError
 
+import history  # memoria BREVE (Fase 5b): compattazione della cronologia
 import memory  # memoria LUNGA persistente (Fase 5a): fatti su SQLite
 import safety
 # SCHEMAS      = elenco dei NOSTRI tool da mostrare al modello (li eseguiamo noi).
@@ -67,6 +68,16 @@ Non fingere mai di aver eseguito un'azione che non puoi eseguire, e non dichiara
 riuscita un'azione il cui tool ha restituito un errore."""
 
 
+# System prompt DEDICATO al riassuntore della memoria BREVE (Fase 5b). Non è Jarvis:
+# è un compito separato, "comprimi questa conversazione conservandone il senso".
+SYSTEM_RIASSUNTO = """Sei un assistente che riassume una conversazione tra un utente e \
+Jarvis (un assistente personale) per conservarne il contesto quando la cronologia \
+diventa troppo lunga. Scrivi in italiano un riassunto CONCISO ma completo, in punti \
+elenco, che conservi: i fatti e le preferenze dell'utente emersi, le decisioni prese, \
+il compito in corso e le questioni ancora aperte, e i risultati importanti degli \
+strumenti usati. Non inventare nulla e non aggiungere commenti fuori dal riassunto."""
+
+
 class Agent:
     """
     L'agente di Jarvis.
@@ -80,6 +91,10 @@ class Agent:
     def __init__(self) -> None:
         self.client = Anthropic()  # legge la chiave da ANTHROPIC_API_KEY
         self.messages: list[dict] = []
+        # Quanti token di INPUT ha usato l'ultima chiamata all'API in questo turno.
+        # È il segnale (gratis, incluso in ogni risposta) per decidere se compattare
+        # la cronologia a fine turno. 0 = nessuna chiamata ancora.
+        self.ultimi_input_tokens = 0
 
     def _costruisci_system(self) -> str:
         """
@@ -116,7 +131,69 @@ class Agent:
             + righe
         )
 
-    def chat(self, user_input: str, on_tool=None) -> str:
+    def _riassumi(self, vecchi: list) -> str:
+        """
+        Chiede al modello un riassunto della parte VECCHIA della cronologia.
+
+        Passiamo un resoconto TESTUALE (non la cronologia in formato API) così il
+        riassuntore non ha bisogno degli schemi dei tool. Nessun tool disponibile qui:
+        vogliamo solo testo, e non deve esserci un pause_turn da gestire.
+        """
+        resoconto = history.serializza_per_riassunto(vecchi)
+        risposta = self.client.messages.create(
+            model=MODEL,
+            max_tokens=1024,
+            system=SYSTEM_RIASSUNTO,
+            messages=[{"role": "user", "content": "Riassumi questa conversazione:\n\n" + resoconto}],
+        )
+        return "".join(b.text for b in risposta.content if b.type == "text").strip()
+
+    def _compatta_se_serve(self, on_note=None) -> None:
+        """
+        A FINE turno, se l'ultimo input ha superato la soglia, compatta la cronologia
+        per alleggerire i turni successivi. Strategia: riassunto della parte vecchia,
+        con TRONCAMENTO come ripiego se il riassunto fallisce.
+
+        `on_note` (opzionale) rende l'operazione visibile a schermo: brain.py non stampa.
+        """
+        if not history.serve_compattare(self.ultimi_input_tokens):
+            return
+
+        indice = history.indice_taglio(self.messages)
+        if indice is None:
+            # Oltre soglia, ma con troppi pochi turni "veri" per tagliare senza
+            # rischiare di spezzare una coppia tool_use/tool_result: non tocchiamo nulla.
+            if on_note is not None:
+                on_note(
+                    f"cronologia oltre soglia ({self.ultimi_input_tokens} token) ma non "
+                    "ancora compattabile in sicurezza"
+                )
+            return
+
+        vecchi = self.messages[:indice]  # parte da riassumere
+        coda = self.messages[indice:]    # ultimi turni, tenuti intatti
+
+        try:
+            riassunto = self._riassumi(vecchi)
+        except AnthropicError as e:
+            # except MIRATO e motivato: se la chiamata di riassunto fallisce NON
+            # lasciamo crescere il contesto all'infinito -> ripieghiamo sul TRONCAMENTO
+            # (perdiamo il vecchio, ma restiamo entro i limiti) e lo dichiariamo.
+            riassunto = None
+            nota = f"riassunto non riuscito ({e}); ho troncato la parte vecchia della cronologia"
+        else:
+            if not riassunto:
+                # Riassunto vuoto: stesso ripiego, senza fingere di aver conservato il contesto.
+                riassunto = None
+                nota = "il riassunto è risultato vuoto; ho troncato la parte vecchia della cronologia"
+            else:
+                nota = "ho compattato la cronologia riassumendone la parte più vecchia"
+
+        self.messages = history.costruisci_compattata(coda, riassunto)
+        if on_note is not None:
+            on_note(f"{nota} (input era {self.ultimi_input_tokens} token, soglia {history.SOGLIA_TOKEN})")
+
+    def chat(self, user_input: str, on_tool=None, on_note=None) -> str:
         """
         Gestisce un turno completo dell'utente, tool inclusi.
 
@@ -148,6 +225,11 @@ class Agent:
                 # ma non li dispatchiamo mai localmente.
                 tools=SCHEMAS + SERVER_TOOLS,
             )
+
+            # Quanti token di input ha pesato QUESTA chiamata (system + tool + cronologia).
+            # L'ultima del turno è la più grande: la usiamo a fine turno per decidere se
+            # compattare la cronologia. È gratis: arriva già dentro la risposta.
+            self.ultimi_input_tokens = response.usage.input_tokens
 
             # Salviamo SEMPRE il turno dell'assistant così com'è: può contenere
             # blocchi di testo, blocchi 'tool_use' (nostri) e blocchi server-side
@@ -186,10 +268,13 @@ class Agent:
             #   "pause_turn"-> gestito sopra (tool server-side da riprendere)
             #   (esistono altri valori, es. "max_tokens", ma qui ci bastano questi)
             if response.stop_reason != "tool_use":
-                # Nessun NOSTRO tool richiesto: estraiamo il testo e chiudiamo il turno.
-                return "".join(
+                # Nessun NOSTRO tool richiesto: estraiamo il testo e usciamo dal loop.
+                # Non restituiamo subito: prima (dopo il while) valutiamo se compattare
+                # la cronologia, così il turno SUCCESSIVO parte più leggero.
+                risposta_finale = "".join(
                     b.text for b in response.content if b.type == "text"
                 )
+                break
 
             # Il modello ha chiesto uno o PIÙ tool nello stesso turno: li eseguiamo tutti.
             tool_results = []
@@ -255,3 +340,10 @@ class Agent:
             self.messages.append({"role": "user", "content": tool_results})
             # ...e il while RIPETE: il modello legge i risultati e decide il passo
             # successivo (un altro tool, oppure finalmente la risposta all'utente).
+
+        # --- FINE TURNO ------------------------------------------------------
+        # Il turno è concluso (siamo usciti dal loop con break). Prima di restituire,
+        # valutiamo se la cronologia è cresciuta troppo e va compattata: alleggerisce
+        # i turni futuri senza cambiare la risposta di questo.
+        self._compatta_se_serve(on_note)
+        return risposta_finale
