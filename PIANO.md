@@ -62,8 +62,16 @@ Consolidamento, stdlib-only. Spezzata in sotto-passi:
   `brain.py` attorno al dispatch (durata via `time.monotonic()`); logga anche i rifiuti
   (precheck e conferma). Osservabilità, non blocca mai l'assistente: su path non
   scrivibile avvisa LOUD una volta e prosegue.
-- 🔜 **7b — retry/errori API**: gestione robusta di errori ed eventuali retry con backoff
-  sulle chiamate all'API.
+- ✅ **7b — retry/errori API**: robustezza delle chiamate a `client.messages.create`.
+  Il retry dei guasti TRANSITORI (rete/timeout, 429, ≥500 incl. 529) è quello NATIVO
+  dell'SDK, solo configurato (`max_retries` via `JARVIS_API_RETRIES`, default 4; timeout
+  opzionale via `JARVIS_API_TIMEOUT`), non reinventato. `descrivi_errore_api()` (funzione
+  pura) classifica transitori vs PERMANENTI (401→chiave, 400/413/404/403; 408/409/5xx per
+  codice) con messaggi mirati, fail-closed sul non classificabile. Graceful degradation:
+  `chat()` non propaga mai un guasto (REPL viva) e, tramite un CHECKPOINT, ripristina una
+  cronologia coerente qualunque cosa vada storta a metà turno (errore API, EOFError da una
+  conferma, guardia `pause_turn`, troncamento `max_tokens` con tool_use spaiato). Rete di
+  sicurezza in `main.py` (except largo, fail loud) come difesa in profondità.
 - ⏳ **7c — README + esempi**: README con setup, architettura e diagramma del loop, più
   3 comandi di esempio funzionanti end-to-end.
 
@@ -78,7 +86,8 @@ I nomi dei branch NON coincidono con i numeri di FASE (sono sequenziali per cont
 | `claude/jarvis-phase-5-shell`       | FASE 4 — Shell                    |
 | `claude/jarvis-phase-6-web`         | FASE 4 — Web                      |
 | `claude/jarvis-phase-7-memory`      | FASE 5 — Memoria (5a + 5b)        |
-| `claude/jarvis-phase-8-logger`      | FASE 7a — logger (prossimo)       |
+| `claude/jarvis-phase-8-logger`      | FASE 7a — logger                  |
+| `claude/jarvis-phase-9-resilience`  | FASE 7b — retry/errori API        |
 
 Ogni fase parte dal branch della precedente e crea il proprio; si pusha solo sul branch
 della fase in corso.
@@ -92,3 +101,5 @@ della fase in corso.
 | `JARVIS_MEMORY`     | File SQLite della memoria lunga                          | `~/Jarvis-Sandbox/jarvis_memory.db`  |
 | `JARVIS_MAX_TOKENS` | Soglia token oltre cui compattare la cronologia          | `40000`                              |
 | `JARVIS_LOG`        | File JSONL delle tool call (FASE 7a)                     | `~/Jarvis-Sandbox/jarvis.jsonl`      |
+| `JARVIS_API_RETRIES`| Ritentativi SDK sugli errori transitori (FASE 7b, >= 0)  | `4`                                  |
+| `JARVIS_API_TIMEOUT`| Timeout in secondi sulla richiesta API (FASE 7b, > 0)    | default SDK                          |
