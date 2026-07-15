@@ -9,11 +9,11 @@ in due oggetti comodi per brain.py:
   - dispatch(name, input): esegue il tool giusto dato il nome scelto dal modello
 """
 
-from . import files, system
+from . import files, system, shell
 
 # Elenco dei moduli-famiglia.
-# Nelle prossime fasi aggiungeremo qui: shell, web.
-_MODULI = [system, files]
+# Nelle prossime fasi aggiungeremo qui: web.
+_MODULI = [system, files, shell]
 
 # Costruiamo il "registro": schema per l'API + mappa nome -> funzione + mappa nome -> rischio.
 SCHEMAS: list[dict] = []
