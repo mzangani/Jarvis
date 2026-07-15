@@ -46,13 +46,21 @@ Quattro famiglie in `tools/`:
   confini sicuri (inizio di un vero turno utente, mai dentro una coppia
   tool_use/tool_result). Visibile via callback `on_note`.
 
-### 💤 FASE 6 — Voce (OPZIONALE, da fare in locale)
-Wrapper attorno al loop, senza toccarlo: STT locale (faster-whisper) → testo → loop →
-TTS (piper). Wake word semplice. Deve restare disattivabile con un flag.
-> **Avvertenze**: (1) richiede dipendenze nuove pesanti (faster-whisper, piper) — è
-> l'eccezione al vincolo, per questo è marcata opzionale; (2) va sviluppata e provata
-> **in locale**: serve hardware audio (microfono/altoparlanti) non disponibile in un
-> ambiente cloud headless.
+### ✅ FASE 6 — Voce (opzionale; audio fisico da collaudare in locale)
+Wrapper attorno al loop, senza toccarlo: `voice.py` = microfono → faster-whisper
+(STT locale) → testo → lo stesso `agent.chat()` → risposta stampata E letta da Piper
+(TTS locale). Push-to-talk di default (Invio, parli, la pausa chiude; il testo
+digitato vale come ripiego tastiera); wake word "Jarvis" con `--wake`, match
+TOLLERANTE alle varianti (nel collaudo a secco whisper ha trascritto "Giorvis").
+Conferme di sicurezza SEMPRE da tastiera: la voce non indebolisce i cancelli.
+Dipendenze extra SOLO qui (`requirements-voice.txt`: faster-whisper, piper-tts,
+sounddevice, numpy — l'eccezione prevista dal vincolo), importate pigramente con
+errori-guida (compreso il caso PortAudio mancante, che solleva OSError). Nuove
+variabili: `JARVIS_STT_MODEL`, `JARVIS_TTS_VOICE`, `JARVIS_VOICE_DIR`.
+> **Collaudo**: la catena TTS→STT è verificata a secco in cloud (Piper sintetizza,
+> whisper ritrascrive correttamente) e lo smoke test copre import pigri e logica
+> pura; microfono/altoparlanti veri vanno provati in locale — checklist "Collaudo
+> completo in locale" nel README.
 
 ### ✅ FASE 7 — Rifinitura
 Consolidamento, stdlib-only. Spezzata in sotto-passi:
@@ -95,7 +103,7 @@ I nomi dei branch NON coincidono con i numeri di FASE (sono sequenziali per cont
 | `claude/jarvis-phase-7-memory`      | FASE 5 — Memoria (5a + 5b)        |
 | `claude/jarvis-phase-8-logger`      | FASE 7a — logger                  |
 | `claude/jarvis-phase-9-resilience`  | FASE 7b — retry/errori API        |
-| `claude/session-gm9k23`             | FASE 7c — README + esempi         |
+| `claude/session-gm9k23`             | FASE 7c — README + esempi; FASE 6 — voce |
 
 Ogni fase parte dal branch della precedente e crea il proprio; si pusha solo sul branch
 della fase in corso.
@@ -111,3 +119,6 @@ della fase in corso.
 | `JARVIS_LOG`        | File JSONL delle tool call (FASE 7a)                     | `~/Jarvis-Sandbox/jarvis.jsonl`      |
 | `JARVIS_API_RETRIES`| Ritentativi SDK sugli errori transitori (FASE 7b, >= 0)  | `4`                                  |
 | `JARVIS_API_TIMEOUT`| Timeout in secondi sulla richiesta API (FASE 7b, > 0)    | default SDK                          |
+| `JARVIS_STT_MODEL`  | (voce, FASE 6) modello faster-whisper per trascrivere    | `small`                              |
+| `JARVIS_TTS_VOICE`  | (voce, FASE 6) voce Piper per la sintesi                 | `it_IT-paola-medium`                 |
+| `JARVIS_VOICE_DIR`  | (voce, FASE 6) cartella delle voci Piper scaricate       | `~/Jarvis-Sandbox/voci-piper`        |

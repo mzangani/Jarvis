@@ -22,6 +22,9 @@ la storia, le convenzioni e lo stato dei lavori sono in [PIANO.md](PIANO.md).
 - Tre dipendenze, elencate in `requirements.txt`: `anthropic` (SDK ufficiale),
   `rich` (output colorato nel terminale), `python-dotenv` (lettura del file `.env`).
   Tutto il resto è libreria standard, per scelta di progetto.
+- (Facoltativo) la [modalità voce](#modalità-voce-opzionale) ha dipendenze extra e
+  più pesanti, in `requirements-voice.txt`: è l'unica eccezione prevista, e la
+  modalità testo non ne ha bisogno.
 
 > Nota: la memoria lunga usa SQLite (incluso in Python). Se il tuo Python ha SQLite
 > senza l'estensione FTS5, la ricerca tra i fatti ripiega automaticamente su un
@@ -131,11 +134,48 @@ server di Anthropic (max 5 ricerche per turno); la query compare nella riga `�
 trasparenza. Ha un piccolo costo aggiuntivo per ogni ricerca — per questo non è tra
 gli esempi "da provare subito".
 
+## Modalità voce (opzionale)
+
+Parli al microfono e Jarvis risponde a voce. Riconoscimento (faster-whisper) e
+sintesi (Piper) girano **in locale**: audio e trascrizioni non lasciano il tuo
+computer, l'unica parte remota resta l'API. Il loop, i tool e la sicurezza sono
+esattamente gli stessi della modalità testo: `voice.py` è solo un'interfaccia in
+più, e `python main.py` continua a funzionare senza nulla di tutto questo.
+
+Setup (una tantum):
+
+```bash
+pip install -r requirements-voice.txt
+# solo Linux: serve anche la libreria di sistema PortAudio
+#   sudo apt install libportaudio2
+python -m piper.download_voices it_IT-paola-medium --data-dir ~/Jarvis-Sandbox/voci-piper
+```
+
+Il modello di trascrizione (~250 MB per `small`) viene scaricato al primo avvio.
+
+Uso:
+
+```bash
+python voice.py          # push-to-talk: premi Invio, parla, una pausa chiude il turno
+python voice.py --wake   # ascolto continuo: di' "Jarvis, ..." per attivarlo
+```
+
+- In push-to-talk puoi anche **digitare** il testo al posto di parlare (comodo se il
+  microfono fa i capricci); "esci" — detto o scritto — chiude.
+- Ctrl-C mentre Jarvis parla zittisce la risposta senza uscire.
+- Le **conferme di sicurezza restano da tastiera** (`s/N`): un "sì" mal trascritto
+  non deve poter autorizzare un'azione rischiosa.
+- La wake word è volutamente tollerante: nel collaudo a secco whisper ha trascritto
+  "Jarvis" anche come "Giorvis", quindi le varianti vicine vengono accettate.
+- Modello STT, voce e cartella voci sono configurabili
+  (`JARVIS_STT_MODEL`, `JARVIS_TTS_VOICE`, `JARVIS_VOICE_DIR`: vedi la tabella).
+
 ## Architettura
 
 | File | Ruolo |
 |------|------|
-| `main.py` | La REPL: legge l'input, stampa risposte e note. È l'**unico** file di interfaccia (stampano, oltre a lui, solo i cancelli di conferma e gli avvisi di `safety.py`/`logger.py`). |
+| `main.py` | La REPL: legge l'input, stampa risposte e note. È l'interfaccia principale (stampano, oltre ai file di interfaccia, solo i cancelli di conferma e gli avvisi di `safety.py`/`logger.py`). |
+| `voice.py` | Seconda interfaccia, opzionale: microfono → trascrizione locale → lo **stesso** `agent.chat()` → risposta stampata e letta a voce. La prova che il loop è generico: un'interfaccia nuova senza toccare il cervello. |
 | `brain.py` | Il cervello: la classe `Agent` con il loop agentico **generico** (`chat()`, `_loop_agentico`, compattazione a fine turno). Non conosce i singoli tool. |
 | `safety.py` | Il guardiano: livelli di rischio, sandbox dei file, blacklist della shell, conferma esplicita, guardiano anti-SSRF per il web. |
 | `memory.py` | Memoria LUNGA: fatti persistenti su SQLite (FTS5, con ripiego `LIKE` onesto). |
@@ -266,10 +306,34 @@ nell'ambiente. Solo la chiave è obbligatoria.
 | `JARVIS_LOG` | File JSONL delle tool call | `~/Jarvis-Sandbox/jarvis.jsonl` |
 | `JARVIS_API_RETRIES` | Ritentativi SDK sugli errori transitori (≥ 0) | `4` |
 | `JARVIS_API_TIMEOUT` | Timeout in secondi sulla richiesta API (> 0) | default SDK |
+| `JARVIS_STT_MODEL` | (voce) modello faster-whisper per la trascrizione | `small` |
+| `JARVIS_TTS_VOICE` | (voce) voce Piper per la sintesi | `it_IT-paola-medium` |
+| `JARVIS_VOICE_DIR` | (voce) cartella delle voci Piper scaricate | `~/Jarvis-Sandbox/voci-piper` |
 
 > NB: i default di `JARVIS_MEMORY` e `JARVIS_LOG` puntano a `~/Jarvis-Sandbox`
 > anche se sposti `JARVIS_SANDBOX` altrove: se vuoi tutto nella stessa cartella,
 > imposta tutte e tre.
+
+## Collaudo completo in locale
+
+Nell'ordine, dal più economico al più completo:
+
+1. **A secco** (senza chiave, senza rete): `python smoke_test.py` → attese: 9
+   verifiche passate, exit code 0.
+2. **Modalità testo con la chiave**: `python main.py` e i tre [Esempi](#esempi) in
+   fila — spazio disco (nessuna conferma) → promemoria (conferma `[s/N]`, poi il
+   file è davvero in `~/Jarvis-Sandbox`) → memoria in due turni (riavvia pure in
+   mezzo: deve ricordare comunque).
+3. **Voce, push-to-talk**: `python voice.py`, premi Invio e chiedi "quanto spazio ho
+   sul disco?" → la trascrizione compare come `Tu (voce) >`, la risposta viene
+   stampata E letta ad alta voce. Poi un'azione con conferma ("crea un file
+   prova.txt con scritto ciao"): la conferma deve arrivare **da tastiera**.
+4. **Voce, wake word**: `python voice.py --wake`, di' "Jarvis, che ore sono?" → si
+   attiva e risponde; una frase **senza** "Jarvis" deve essere ignorata.
+
+Se un passo fallisce, i messaggi dicono cosa manca (dipendenza, PortAudio, voce
+Piper da scaricare, chiave API). Su CPU, tra la fine della frase e la risposta
+vocale passano alcuni secondi (trascrizione + modello + sintesi): è normale.
 
 ## Limiti noti
 
@@ -287,5 +351,8 @@ nell'ambiente. Solo la chiave è obbligatoria.
 - La cronologia **non** persiste tra i riavvii (persiste solo la memoria lunga);
   un processo = una conversazione.
 - Non c'è una suite di test automatica completa: `smoke_test.py` copre la verifica
-  a secco, il loop end-to-end va provato a mano con la chiave (vedi Esempi).
-- La FASE 6 (voce) è opzionale e non implementata: vedi [PIANO.md](PIANO.md).
+  a secco, il resto va provato a mano (vedi [Collaudo](#collaudo-completo-in-locale)).
+- La modalità voce è collaudata a secco (la catena sintesi→trascrizione è stata
+  verificata in un ambiente senza audio), ma microfono e altoparlanti veri vanno
+  provati in locale. La trascrizione non è perfetta (per questo la wake word accetta
+  varianti come "Giorvis") e su CPU ogni turno vocale costa alcuni secondi di attesa.
