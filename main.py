@@ -32,7 +32,7 @@ def main() -> None:
     agent = Agent()
 
     console.print(
-        "[bold cyan]Jarvis[/] è attivo (Fase 2). "
+        "[bold cyan]Jarvis[/] è attivo. "
         "Prova: [italic]quanto spazio ho sul disco?[/] — Scrivi [bold]esci[/] per terminare.\n"
     )
 
