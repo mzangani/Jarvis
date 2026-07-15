@@ -20,6 +20,11 @@ def _mostra_tool(name: str, tool_input: dict) -> None:
     console.print(f"[dim]🔧 uso {name}({tool_input})[/]")
 
 
+def _mostra_nota(messaggio: str) -> None:
+    """Callback: mostra le note interne di Jarvis, es. la compattazione della cronologia."""
+    console.print(f"[dim]🧠 {messaggio}[/]")
+
+
 def main() -> None:
     # Carica le variabili da un file .env (in particolare ANTHROPIC_API_KEY).
     load_dotenv()
@@ -44,8 +49,9 @@ def main() -> None:
             console.print("[dim]Arrivederci.[/]")
             break
 
-        # Passiamo la callback: così vediamo i tool mentre vengono usati.
-        reply = agent.chat(user_input, on_tool=_mostra_tool)
+        # Passiamo le callback: così vediamo i tool usati e le note interne
+        # (es. quando Jarvis compatta la cronologia troppo lunga).
+        reply = agent.chat(user_input, on_tool=_mostra_tool, on_note=_mostra_nota)
         console.print(f"[bold cyan]Jarvis >[/] {reply}\n")
 
 
