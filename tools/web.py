@@ -32,6 +32,13 @@ dipendenze nuove (requests, httpx, beautifulsoup...).
 Limite onesto: html.parser NON esegue JavaScript. Su pagine che costruiscono il
 contenuto via script (molte "single page app") uscirà poco testo — è un limite del
 metodo, non un bug, e lo dichiariamo nella description e all'utente.
+
+Due capacità Web, complementari:
+  - leggi_pagina(url): il nostro lettore controllato (stdlib + guardiano SSRF),
+    descritto sopra.
+  - web_search: la RICERCA online, un tool SERVER-SIDE nativo dell'API Anthropic
+    (eseguito da Anthropic, non da noi). Trova le fonti/URL; poi, se serve,
+    leggi_pagina ne legge una in dettaglio. Vedi la sezione "Ricerca web" in fondo.
 """
 
 import re
@@ -270,6 +277,38 @@ LEGGI_PAGINA = {
 TOOLS = [
     (LEGGI_PAGINA, leggi_pagina, CAUTION),
 ]
+
+
+# --- Ricerca web: TOOL SERVER-SIDE (nativo dell'API Anthropic) ---------------
+# Questa è la seconda capacità Web richiesta dal piano: CERCARE online. A
+# differenza di leggi_pagina, NON è un nostro tool: è un "server tool" eseguito
+# da Anthropic. Il modello emette la ricerca, Anthropic fa la query, filtra i
+# risultati e li rimanda dentro la STESSA risposta (blocchi server_tool_use +
+# web_search_tool_result). Per questo NON è una terna (schema, funzione, rischio):
+#   - non ha una funzione Python nostra (non lo eseguiamo noi),
+#   - non passa dal nostro dispatch()/confirm() (è già eseguito lato server),
+#   - lo dichiariamo solo per NOME e TIPO, e lo passiamo alla create() concatenato
+#     agli SCHEMAS tramite la lista SERVER_TOOLS qui sotto.
+#
+# Scelte discusse e decise:
+#   - RISCHIO: lo trattiamo come SAFE (sola lettura, nessun effetto locale). Non
+#     può passare dal cancello confirm() perché è server-side; per onestà brain.py
+#     lo rende comunque VISIBILE (mostra la query) e il SYSTEM_PROMPT avvisa che la
+#     ricerca invia la richiesta in rete e ha un piccolo costo per ricerca.
+#   - max_uses = 5: tetto alle ricerche per turno, freno a loop e costi imprevisti.
+#   - Nessun allowed_domains/blocked_domains: per un assistente personale lasciamo
+#     la ricerca aperta (la manopola esiste, la useremo se servirà).
+#   - Tipo web_search_20260209: variante con filtraggio dinamico dei risultati
+#     (più efficiente sul contesto), supportata dal modello in uso (claude-sonnet-4-6).
+WEB_SEARCH = {
+    "type": "web_search_20260209",
+    "name": "web_search",
+    "max_uses": 5,  # al massimo 5 ricerche per turno
+}
+
+# Tool server-side esposti da questa famiglia. tools/__init__.py li raccoglie
+# (come fa con PRECHECKS) e brain.py li passa alla create() insieme agli SCHEMAS.
+SERVER_TOOLS = [WEB_SEARCH]
 
 
 # --- Pre-validazione (cancello 0, PRIMA della conferma) ----------------------

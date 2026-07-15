@@ -9,12 +9,20 @@ Regola d'oro: il modello DECIDE, il nostro codice ESEGUE.
 from anthropic import Anthropic
 
 import safety
-# SCHEMAS = elenco dei tool da mostrare al modello.
-# dispatch = funzione che, dato un nome, esegue il tool giusto.
-# risk_of  = livello di rischio di un tool (SAFE / CAUTION / DANGEROUS).
-from tools import SCHEMAS, dispatch, risk_of, precheck
+# SCHEMAS      = elenco dei NOSTRI tool da mostrare al modello (li eseguiamo noi).
+# SERVER_TOOLS = tool "server-side" eseguiti da Anthropic (es. web_search): li
+#                passiamo alla create() ma non li dispatchiamo mai localmente.
+# dispatch     = funzione che, dato un nome, esegue il tool giusto.
+# risk_of      = livello di rischio di un tool (SAFE / CAUTION / DANGEROUS).
+from tools import SCHEMAS, SERVER_TOOLS, dispatch, risk_of, precheck
 
 MODEL = "claude-sonnet-4-6"
+
+# Quante volte, in un singolo turno, accettiamo di "riprendere" un tool server-side
+# fermatosi con stop_reason == "pause_turn" (vedi il loop). È una guardia anti-loop:
+# se il server continuasse a chiedere di riprendere oltre questo tetto, ci fermiamo
+# con un errore invece di restare bloccati per sempre.
+_MAX_PAUSE_RESUME = 10
 
 SYSTEM_PROMPT = """Sei Jarvis, un assistente personale che gira sul computer dell'utente.
 Parli in italiano, in modo diretto e conciso.
@@ -31,10 +39,16 @@ rispondere, usali invece di rispondere a memoria o di inventare:
   strumenti. È lo strumento più potente e delicato: preferisci sempre un tool
   dedicato quando esiste. Alcuni comandi distruttivi sono sempre vietati, e ogni
   comando chiede conferma prima di essere eseguito.
-- Web: leggere una pagina web dato il suo URL e ottenerne il testo leggibile
-  (senza HTML, script o stile). Funziona con http/https; gli indirizzi locali e
-  di rete privata sono bloccati per sicurezza, ed è normale. Non esegue
-  JavaScript, quindi su pagine molto dinamiche potresti ottenere poco testo.
+- Web: cercare informazioni sul web (ricerca online) e leggere una pagina web dato
+  il suo URL. La RICERCA trova fonti e informazioni aggiornate: usala quando servono
+  notizie recenti o dati che non conosci, e cita sempre le fonti. La LETTURA
+  (leggi_pagina) recupera il testo leggibile di una pagina di cui hai (o puoi
+  costruire) l'URL, senza HTML/script/stile; funziona con http/https, gli indirizzi
+  locali e di rete privata sono bloccati per sicurezza (ed è normale), e non esegue
+  JavaScript, quindi su pagine molto dinamiche potresti ottenere poco testo. Spesso
+  il flusso naturale è: prima cerchi, poi (se serve) leggi una delle fonti trovate.
+  Nota onesta: la ricerca invia la richiesta in rete (ad Anthropic e al motore di
+  ricerca) e ha un piccolo costo per ogni ricerca.
 
 Alcune azioni che modificano il sistema o i file chiedono conferma all'utente
 prima di essere eseguite: se l'utente rifiuta, riceverai un risultato che te lo
@@ -68,6 +82,10 @@ class Agent:
         # Aggiungiamo il messaggio dell'utente alla cronologia.
         self.messages.append({"role": "user", "content": user_input})
 
+        # Contatore delle "riprese" dei tool server-side in questo turno (vedi
+        # pause_turn più sotto). Serve solo come guardia anti-loop.
+        riprese_pause = 0
+
         # --- IL LOOP AGENTICO -------------------------------------------------
         # Ripete finché il modello NON chiede più tool. Può fare più giri!
         while True:
@@ -76,20 +94,50 @@ class Agent:
                 max_tokens=2048,
                 system=SYSTEM_PROMPT,
                 messages=self.messages,
-                tools=SCHEMAS,          # <- diciamo al modello quali tool esistono
+                # SCHEMAS = i nostri tool (li eseguiamo noi). SERVER_TOOLS = i tool
+                # nativi eseguiti da Anthropic (es. web_search): li dichiariamo qui,
+                # ma non li dispatchiamo mai localmente.
+                tools=SCHEMAS + SERVER_TOOLS,
             )
 
-            # Salviamo SEMPRE il turno dell'assistant così com'è: può contenere sia
-            # blocchi di testo sia blocchi 'tool_use'. Ci serve integro perché i
+            # Salviamo SEMPRE il turno dell'assistant così com'è: può contenere
+            # blocchi di testo, blocchi 'tool_use' (nostri) e blocchi server-side
+            # (server_tool_use + web_search_tool_result). Ci serve integro perché i
             # tool_result che invieremo dopo devono riferirsi ai loro 'id'.
             self.messages.append({"role": "assistant", "content": response.content})
+
+            # VISIBILITÀ del web search: è server-side e NON passa dal cancello
+            # confirm(). Per trasparenza mostriamo comunque la ricerca (la query)
+            # tramite la callback, così l'utente vede cosa Jarvis ha cercato. I
+            # blocchi 'server_tool_use' sono la richiesta di un tool eseguito da
+            # Anthropic (il risultato è già nella risposta, non tocca a noi).
+            if on_tool is not None:
+                for block in response.content:
+                    if block.type == "server_tool_use":
+                        on_tool(block.name, block.input)
+
+            # PAUSE_TURN: il loop server-side dei tool nativi ha raggiunto il suo
+            # limite interno di iterazioni ma NON ha finito. Non è una risposta
+            # pronta: ri-mandiamo la conversazione (che già termina con questo turno
+            # assistant) per far RIPRENDERE il server. Non aggiungiamo un messaggio
+            # "continua": l'API riconosce il blocco server_tool_use in coda e riprende.
+            if response.stop_reason == "pause_turn":
+                riprese_pause += 1
+                if riprese_pause > _MAX_PAUSE_RESUME:
+                    # Fail loud: non restiamo bloccati e non fingiamo una risposta.
+                    raise RuntimeError(
+                        "Il tool di ricerca web ha continuato a chiedere di riprendere "
+                        f"oltre il limite ({_MAX_PAUSE_RESUME}); interrompo per sicurezza."
+                    )
+                continue
 
             # stop_reason spiega PERCHÉ il modello si è fermato:
             #   "end_turn"  -> ha finito: ha una risposta pronta per l'utente
             #   "tool_use"  -> vuole che eseguiamo uno o più tool prima di continuare
+            #   "pause_turn"-> gestito sopra (tool server-side da riprendere)
             #   (esistono altri valori, es. "max_tokens", ma qui ci bastano questi)
             if response.stop_reason != "tool_use":
-                # Nessun tool richiesto: estraiamo il testo e chiudiamo il turno.
+                # Nessun NOSTRO tool richiesto: estraiamo il testo e chiudiamo il turno.
                 return "".join(
                     b.text for b in response.content if b.type == "text"
                 )
