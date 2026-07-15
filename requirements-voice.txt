@@ -1,0 +1,13 @@
+# Dipendenze OPZIONALI della modalità voce (FASE 6): servono solo per `python voice.py`.
+# Sono l'unica eccezione prevista alla regola "solo anthropic/rich/python-dotenv"
+# (vedi PIANO.md); la modalità testo (`python main.py`) non le richiede.
+#
+#   pip install -r requirements-voice.txt
+#
+# NB: `sounddevice` si appoggia alla libreria di sistema PortAudio:
+#   - Linux (Debian/Ubuntu):  sudo apt install libportaudio2
+#   - macOS e Windows: già inclusa nel pacchetto pip, nessun passo extra.
+faster-whisper
+piper-tts
+sounddevice
+numpy
