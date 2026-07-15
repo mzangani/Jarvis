@@ -56,9 +56,13 @@ TTS (piper). Wake word semplice. Deve restare disattivabile con un flag.
 
 ### ⏳ FASE 7 — Rifinitura
 Consolidamento, stdlib-only. Spezzata in sotto-passi:
-- 🔜 **7a — `logger.py`**: ogni tool call loggata su file JSONL (input, output, durata,
-  esito). Path via `JARVIS_LOG`. Osservabilità, non blocca mai l'assistente.
-- ⏳ **7b — retry/errori API**: gestione robusta di errori ed eventuali retry con backoff
+- ✅ **7a — `logger.py`**: ogni tool call loggata su file JSONL (`quando`, `tool`, `input`,
+  `output` troncato, `is_error`, `esito` ok/errore/rifiutato, `durata_ms`, `rischio`), in
+  append. Path via `JARVIS_LOG` (default `~/Jarvis-Sandbox/jarvis.jsonl`). Chiamato da
+  `brain.py` attorno al dispatch (durata via `time.monotonic()`); logga anche i rifiuti
+  (precheck e conferma). Osservabilità, non blocca mai l'assistente: su path non
+  scrivibile avvisa LOUD una volta e prosegue.
+- 🔜 **7b — retry/errori API**: gestione robusta di errori ed eventuali retry con backoff
   sulle chiamate all'API.
 - ⏳ **7c — README + esempi**: README con setup, architettura e diagramma del loop, più
   3 comandi di esempio funzionanti end-to-end.
