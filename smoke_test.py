@@ -6,8 +6,9 @@ reggano, che il registro dei tool sia integro, che i cancelli di sicurezza blocc
 ciò che devono bloccare, e che i tool SAFE (file, sistema, memoria, log) funzionino
 in isolamento su cartelle temporanee — la sandbox vera dell'utente non viene toccata.
 
-NON copre il loop agentico end-to-end (il modello che decide, la conferma, il web):
-per quello servono una ANTHROPIC_API_KEY reale e la rete — vedi gli Esempi nel README.
+NON copre il loop agentico end-to-end (il modello che decide, la conferma, il web) né
+l'audio vero della modalità voce (microfono/altoparlanti): per quelli servono una
+ANTHROPIC_API_KEY reale, la rete e hardware audio — vedi Esempi e Collaudo nel README.
 
 Uso:  python smoke_test.py
 Esce con codice 0 se tutte le verifiche passano, 1 altrimenti (fail loud).
@@ -159,6 +160,33 @@ def check_logger() -> None:
     assert riga["tool"] == "tool_di_prova" and riga["esito"] == "ok"
 
 
+def check_voce_a_secco() -> None:
+    """
+    La parte a secco della modalità voce (FASE 6): il modulo deve importarsi SENZA
+    le dipendenze opzionali (import pigri), e la logica pura deve funzionare.
+    Il giro completo microfono->STT->TTS->altoparlanti si collauda solo in locale.
+    """
+    import voice
+
+    # Contratto degli import pigri: importare voice NON deve caricare le librerie
+    # audio (np/sd restano None finché non si avvia davvero la modalità voce).
+    assert voice.np is None and voice.sd is None, \
+        "voice.py carica le librerie voce già all'import: devono restare pigre"
+
+    # Wake word: match tollerante. "Giorvis" è una variante REALE osservata
+    # collaudando la catena Piper -> whisper (la pronuncia viene italianizzata).
+    assert voice.estrai_dopo_wake("Jarvis, che ore sono?") == "che ore sono?"
+    assert voice.estrai_dopo_wake("Ehi Giorvis dimmi il meteo") == "dimmi il meteo"
+    assert voice.estrai_dopo_wake("giarvis") == ""          # solo wake word: richiesta vuota
+    assert voice.estrai_dopo_wake("che ore sono?") is None  # nessuna wake word
+    assert voice.estrai_dopo_wake("il servizio è attivo") is None  # niente falsi positivi
+
+    # Comandi di uscita, detti o digitati (la trascrizione aggiunge punteggiatura).
+    assert voice.e_comando_uscita("Esci.")
+    assert voice.e_comando_uscita("exit")
+    assert not voice.e_comando_uscita("esci dalla cartella")
+
+
 # Le verifiche, in ordine: prima gli import (se cadono loro, cade tutto il resto).
 CHECKS = [
     ("import dei moduli (senza avviare la REPL)", check_import_moduli),
@@ -169,6 +197,7 @@ CHECKS = [
     ("memoria lunga (DB temporaneo)", check_memoria),
     ("memoria breve (funzioni pure di history)", check_memoria_breve),
     ("logger JSONL (file temporaneo)", check_logger),
+    ("modalità voce: import pigro e logica pura (wake word, uscita)", check_voce_a_secco),
 ]
 
 
