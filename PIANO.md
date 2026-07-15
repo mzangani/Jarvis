@@ -54,7 +54,7 @@ TTS (piper). Wake word semplice. Deve restare disattivabile con un flag.
 > **in locale**: serve hardware audio (microfono/altoparlanti) non disponibile in un
 > ambiente cloud headless.
 
-### ⏳ FASE 7 — Rifinitura
+### ✅ FASE 7 — Rifinitura
 Consolidamento, stdlib-only. Spezzata in sotto-passi:
 - ✅ **7a — `logger.py`**: ogni tool call loggata su file JSONL (`quando`, `tool`, `input`,
   `output` troncato, `is_error`, `esito` ok/errore/rifiutato, `durata_ms`, `rischio`), in
@@ -72,8 +72,15 @@ Consolidamento, stdlib-only. Spezzata in sotto-passi:
   cronologia coerente qualunque cosa vada storta a metà turno (errore API, EOFError da una
   conferma, guardia `pause_turn`, troncamento `max_tokens` con tool_use spaiato). Rete di
   sicurezza in `main.py` (except largo, fail loud) come difesa in profondità.
-- ⏳ **7c — README + esempi**: README con setup, architettura e diagramma del loop, più
-  3 comandi di esempio funzionanti end-to-end.
+- ✅ **7c — README + esempi**: README completo in italiano — setup passo-passo,
+  3 esempi end-to-end (sistema SAFE, file con conferma, memoria in due turni; web
+  citato come facoltativo per il costo), architettura con diagramma Mermaid del loop,
+  tool, sicurezza, memoria, osservabilità, robustezza, tabella variabili d'ambiente,
+  limiti noti. Onestà sulla verificabilità: `smoke_test.py` copre la verifica "a
+  secco" (senza chiave né rete: import, registro tool, cancelli di sicurezza, tool
+  SAFE su cartelle temporanee), gli esempi completi sono dichiarati "da provare in
+  locale con la chiave". Rifiniture: `.env.example` ora documenta anche
+  `JARVIS_SANDBOX`; il banner di `main.py` non cita più la fase.
 
 ## Mappa branch ↔ fasi
 
@@ -88,6 +95,7 @@ I nomi dei branch NON coincidono con i numeri di FASE (sono sequenziali per cont
 | `claude/jarvis-phase-7-memory`      | FASE 5 — Memoria (5a + 5b)        |
 | `claude/jarvis-phase-8-logger`      | FASE 7a — logger                  |
 | `claude/jarvis-phase-9-resilience`  | FASE 7b — retry/errori API        |
+| `claude/session-gm9k23`             | FASE 7c — README + esempi         |
 
 Ogni fase parte dal branch della precedente e crea il proprio; si pusha solo sul branch
 della fase in corso.
