@@ -171,3 +171,27 @@ ESEGUI_COMANDO = {
 TOOLS = [
     (ESEGUI_COMANDO, esegui_comando, DANGEROUS),
 ]
+
+
+# --- Pre-validazione (cancello 0, PRIMA della conferma) -----------------------
+# La blacklist è sintassi SHELL, quindi non può girare nel loop generico su ogni
+# tool (bloccherebbe, ad es., uno scrivi_file con contenuto "come usare sudo").
+# Perciò la dichiariamo QUI, come validazione specifica della famiglia shell.
+# brain.py la eseguirà PRIMA di chiedere conferma: un comando vietato viene così
+# respinto senza nemmeno far comparire il prompt.
+#
+# È volutamente la STESSA blacklist della prima riga di esegui_comando: qui la
+# anticipiamo solo. La ripetizione è difesa in profondità (esegui_comando resta
+# sicuro anche se chiamato direttamente, es. nei test), NON un doppione della
+# conferma, che rimane unica in brain.py.
+def _precheck_esegui_comando(tool_input: dict) -> None:
+    """Solleva PermissionError se il comando viola la blacklist (prima della conferma)."""
+    safety.check_blacklist(tool_input.get("comando", ""))
+
+
+# Mappa nome_tool -> validatore. Il registro (tools/__init__.py) aggrega questi
+# dizionari da tutte le famiglie, come fa con TOOLS. Le famiglie senza pre-check
+# semplicemente non definiscono PRECHECKS.
+PRECHECKS = {
+    "esegui_comando": _precheck_esegui_comando,
+}

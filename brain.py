@@ -12,7 +12,7 @@ import safety
 # SCHEMAS = elenco dei tool da mostrare al modello.
 # dispatch = funzione che, dato un nome, esegue il tool giusto.
 # risk_of  = livello di rischio di un tool (SAFE / CAUTION / DANGEROUS).
-from tools import SCHEMAS, dispatch, risk_of
+from tools import SCHEMAS, dispatch, risk_of, precheck
 
 MODEL = "claude-sonnet-4-6"
 
@@ -100,6 +100,22 @@ class Agent:
 
                 if on_tool is not None:
                     on_tool(block.name, block.input)
+
+                # CANCELLO 0: validazione categorica PRIMA della conferma. Alcune
+                # azioni sono SEMPRE vietate (es. la blacklist della shell): le
+                # respingiamo subito, senza nemmeno mostrare il prompt di conferma.
+                # precheck è un no-op per i tool che non dichiarano un pre-check.
+                # Se solleva, rimandiamo l'errore al modello e passiamo oltre.
+                try:
+                    precheck(block.name, block.input)
+                except Exception as e:
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": f"Azione rifiutata: {e}",
+                        "is_error": True,
+                    })
+                    continue
 
                 # CANCELLO DI SICUREZZA: se l'azione non è SAFE, chiediamo conferma
                 # esplicita PRIMA di eseguire. Se l'utente rifiuta, non eseguiamo e
