@@ -8,9 +8,11 @@ Regola d'oro: il modello DECIDE, il nostro codice ESEGUE.
 
 from anthropic import Anthropic
 
+import safety
 # SCHEMAS = elenco dei tool da mostrare al modello.
 # dispatch = funzione che, dato un nome, esegue il tool giusto.
-from tools import SCHEMAS, dispatch
+# risk_of  = livello di rischio di un tool (SAFE / CAUTION / DANGEROUS).
+from tools import SCHEMAS, dispatch, risk_of
 
 MODEL = "claude-sonnet-4-6"
 
@@ -84,6 +86,22 @@ class Agent:
 
                 if on_tool is not None:
                     on_tool(block.name, block.input)
+
+                # CANCELLO DI SICUREZZA: se l'azione non è SAFE, chiediamo conferma
+                # esplicita PRIMA di eseguire. Se l'utente rifiuta, non eseguiamo e
+                # rimandiamo al modello un tool_result che glielo comunica (così può
+                # proporre un'alternativa invece di bloccarsi).
+                rischio = risk_of(block.name)
+                if rischio != safety.SAFE and not safety.confirm(
+                    block.name, block.input, rischio
+                ):
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": "L'utente ha rifiutato l'esecuzione di questa azione.",
+                        "is_error": False,
+                    })
+                    continue
 
                 # Fail loud: se il tool fallisce, NON nascondiamo l'errore.
                 # Lo rimandiamo al modello come osservazione, così può correggersi.
