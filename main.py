@@ -51,7 +51,22 @@ def main() -> None:
 
         # Passiamo le callback: così vediamo i tool usati e le note interne
         # (es. quando Jarvis compatta la cronologia troppo lunga).
-        reply = agent.chat(user_input, on_tool=_mostra_tool, on_note=_mostra_nota)
+        #
+        # RETE DI SICUREZZA (difesa in profondità, Fase 7b): brain.chat() gestisce già i
+        # guasti dell'API senza crashare e, qualunque cosa vada storta a metà turno,
+        # ripristina una cronologia coerente PRIMA di propagare (vedi il checkpoint in
+        # chat()). Questo except è l'ultima linea: cattura QUALSIASI imprevisto non-API
+        # (un bug nostro, un EOFError da una conferma, un OSError...) e tiene viva la
+        # sessione mostrando l'errore. È LARGO ma NON è un `except: pass`: stampa
+        # l'errore (fail loud) e prosegue. NON cattura KeyboardInterrupt (è BaseException,
+        # non Exception): così Ctrl-C durante una chiamata lunga interrompe ancora il
+        # programma, come è giusto.
+        try:
+            reply = agent.chat(user_input, on_tool=_mostra_tool, on_note=_mostra_nota)
+        except Exception as e:
+            console.print(f"[bold red]⚠ Errore imprevisto:[/] {e}")
+            console.print("[dim]La sessione resta attiva; puoi continuare.[/]\n")
+            continue
         console.print(f"[bold cyan]Jarvis >[/] {reply}\n")
 
 
