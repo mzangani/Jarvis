@@ -1,0 +1,19 @@
+# Dipendenze OPZIONALI per la modalità VOCE (Fase 6).
+#
+# NON servono per il core di Jarvis, che resta a anthropic/rich/python-dotenv
+# (vedi requirements.txt). Installale SOLO se vuoi usare la voce:
+#
+#     pip install -r requirements-voice.txt
+#
+# Servono anche risorse di sistema (microfono e altoparlanti) e, per il TTS, il
+# programma 'piper' con un modello voce .onnx. Vedi la sezione "Voce" del README.
+# Queste librerie sono pesanti e dipendenti dal sistema operativo: vanno installate
+# e collaudate in LOCALE (un ambiente cloud headless non ha hardware audio).
+
+faster-whisper   # STT locale: speech-to-text senza cloud
+sounddevice      # cattura dal microfono e riproduzione sull'altoparlante
+numpy            # array audio (usati da STT e riproduzione)
+
+# TTS: piper si installa spesso come programma a parte (binario + modello voce),
+# non solo come pacchetto Python. Istruzioni nel README (sezione Voce).
+# Riferimento: https://github.com/rhasspy/piper

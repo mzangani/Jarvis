@@ -205,6 +205,33 @@ Jarvis > Nella cartella ~/Sviluppo.
 **ricerca web** (`web_search`): usa la rete e ha un piccolo costo per ricerca, quindi non
 è tra gli esempi di base.
 
+## Voce (opzionale, Fase 6)
+
+Jarvis può funzionare **a voce**: microfono → riconoscimento vocale (STT) → il solito loop
+→ sintesi vocale (TTS) → altoparlante. È un **guscio** attorno allo stesso cervello
+(`voice.py`): il loop non cambia.
+
+È **opzionale e disattivata di default**, perché richiede dipendenze pesanti e hardware
+audio. Il core resta a 3 dipendenze. Per usarla:
+
+```bash
+# 1. dipendenze audio (separate dal core) + il programma piper con un modello voce
+pip install -r requirements-voice.txt
+#    piper: vedi https://github.com/rhasspy/piper (binario + modello voce .onnx)
+
+# 2. avvia in modalità voce
+python main.py --voce        # oppure:  JARVIS_VOICE=1 python main.py
+```
+
+Di' **«esci»** per terminare. Se le dipendenze audio mancano, Jarvis te lo dice e
+**ripiega automaticamente sulla modalità testo**.
+
+> **Stato**: lo *scheletro* è pronto e il flusso non-audio è testato; i backend audio
+> reali (faster-whisper, piper, sounddevice) sono un punto di partenza da **collaudare e
+> rifinire in locale**, perché servono microfono e altoparlanti. Limiti attuali: ascolto a
+> finestra fissa (non ancora rilevazione del silenzio) e la conferma delle azioni
+> CAUTION/DANGEROUS passa ancora dalla tastiera.
+
 ## Verifica rapida (smoke-test)
 
 Per un controllo veloce **senza chiave API e senza rete**:
@@ -219,8 +246,9 @@ tool `SAFE` giri in isolamento. **Non** sostituisce la prova end-to-end degli
 
 ## Limiti noti
 
-- **Voce** (Fase 6, STT/TTS) non implementata: è opzionale e va fatta in locale (hardware
-  audio + dipendenze pesanti).
+- **Voce** (Fase 6): scheletro pronto e testato nel flusso non-audio (vedi
+  [Voce](#voce-opzionale-fase-6)); i backend audio reali vanno collaudati in locale
+  (servono hardware audio e dipendenze pesanti).
 - Il **richiamo** della memoria è per parole chiave, non semantico (non capisce i sinonimi).
 - Alcune azioni (processi, screenshot, apertura app) usano gli **strumenti nativi del
   sistema operativo**: se su un dato SO manca lo strumento, Jarvis lo dice con un errore

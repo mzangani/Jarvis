@@ -46,13 +46,19 @@ Quattro famiglie in `tools/`:
   confini sicuri (inizio di un vero turno utente, mai dentro una coppia
   tool_use/tool_result). Visibile via callback `on_note`.
 
-### 💤 FASE 6 — Voce (OPZIONALE, da fare in locale)
-Wrapper attorno al loop, senza toccarlo: STT locale (faster-whisper) → testo → loop →
-TTS (piper). Wake word semplice. Deve restare disattivabile con un flag.
-> **Avvertenze**: (1) richiede dipendenze nuove pesanti (faster-whisper, piper) — è
-> l'eccezione al vincolo, per questo è marcata opzionale; (2) va sviluppata e provata
-> **in locale**: serve hardware audio (microfono/altoparlanti) non disponibile in un
-> ambiente cloud headless.
+### 💤 FASE 6 — Voce (OPZIONALE) — scheletro pronto, audio da collaudare in locale
+Wrapper attorno al loop, senza toccarlo (`voice.py`): microfono → STT → `agent.chat` →
+TTS → altoparlante. Disattivabile: opt-in con `--voce` o `JARVIS_VOICE=1`, altrimenti
+Jarvis resta testuale e il core resta a 3 dipendenze.
+- **Fatto qui**: l'orchestrazione `ciclo_vocale` (con wake word e frasi d'uscita), scritta
+  contro BACKEND iniettabili → testata su MOCK del flusso non-audio; import GUARDATI in
+  `crea_backend_reali` (se le deps mancano → messaggio chiaro + ripiego sul testo in
+  `main.py`); `requirements-voice.txt` separato; smoke-test che verifica il design guardato.
+- **Da fare in locale**: collaudare/rifinire i backend audio reali (faster-whisper, piper,
+  sounddevice) — servono microfono/altoparlanti, assenti in un ambiente cloud headless —
+  e migliorare ascolto (rilevazione del silenzio) e conferma vocale delle azioni.
+> **Avvertenza**: le librerie audio sono l'ECCEZIONE al vincolo dipendenze (pesanti,
+> specifiche per OS): stanno in `requirements-voice.txt`, mai nel core.
 
 ### ✅ FASE 7 — Rifinitura
 Consolidamento, stdlib-only. Spezzata in sotto-passi:
@@ -107,3 +113,4 @@ della fase in corso.
 | `JARVIS_LOG`        | File JSONL delle tool call (FASE 7a)                     | `~/Jarvis-Sandbox/jarvis.jsonl`      |
 | `JARVIS_API_RETRIES`| Ritentativi SDK sugli errori transitori (FASE 7b, >= 0)  | `4`                                  |
 | `JARVIS_API_TIMEOUT`| Timeout in secondi sulla richiesta API (FASE 7b, > 0)    | default SDK                          |
+| `JARVIS_VOICE`      | Attiva la modalità voce (FASE 6, opzionale)              | disattivata                          |

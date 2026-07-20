@@ -86,6 +86,34 @@ out = tools.dispatch("get_system_info", {})
 check("get_system_info restituisce testo non vuoto", isinstance(out, str) and bool(out.strip()))
 check("l'output contiene 'Sistema operativo'", "Sistema operativo" in out, f"-> {out[:60]!r}…")
 
+# --- 5) VOCE (Fase 6): il design OPZIONALE/GUARDATO regge senza dipendenze audio --------
+print("\n=== 5. voce: modulo opzionale e guardato ===")
+# `import voice` deve funzionare SEMPRE (non tira dentro l'audio al top del modulo).
+import voice
+check("import voice funziona senza dipendenze audio", True)
+check("ciclo_vocale e crea_backend_reali esistono",
+      hasattr(voice, "ciclo_vocale") and hasattr(voice, "crea_backend_reali"))
+# Senza le librerie audio installate, crea_backend_reali deve fallire con un messaggio
+# CHIARO (RuntimeError con le istruzioni), non un ImportError oscuro. Se invece qui le
+# librerie ci fossero, saltiamo il controllo (non è un errore).
+try:
+    import faster_whisper  # noqa: F401
+    import sounddevice  # noqa: F401
+    _audio_presente = True
+except ImportError:
+    _audio_presente = False
+
+if _audio_presente:
+    check("deps audio presenti: salto il controllo del ripiego", True,
+          "(faster_whisper/sounddevice installati)")
+else:
+    try:
+        voice.crea_backend_reali()
+        check("crea_backend_reali fallisce senza deps", False, "non ha sollevato")
+    except RuntimeError as e:
+        check("crea_backend_reali fallisce con messaggio chiaro",
+              "requirements-voice.txt" in str(e), f"-> {e}")
+
 # --- Esito ------------------------------------------------------------------------------
 print("\n" + "=" * 60)
 if FALLITI:
