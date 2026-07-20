@@ -122,7 +122,7 @@ def crea_backend_reali(
     secondi_ascolto: float = 5.0,
     sample_rate: int = 16000,
     modello_whisper: str = "base",
-    voce_piper: str = "it_IT-riccardo-x_low",
+    voce_piper: Optional[str] = None,
 ) -> BackendVocale:
     """
     Costruisce i backend audio REALI, facendo import GUARDATI delle librerie opzionali.
@@ -132,9 +132,18 @@ def crea_backend_reali(
     ascolto, sample rate, nome dei modelli, invocazione di piper) sono un PUNTO DI
     PARTENZA ragionevole da verificare e rifinire sulla tua macchina.
 
+    `voce_piper` è il PERCORSO del modello voce (il file .onnx scaricato, estensione
+    inclusa: piper non lo indovina da un nome logico). Se non passato esplicitamente,
+    si legge da `JARVIS_PIPER_MODEL`; in mancanza di entrambi si usa un nome di comodo
+    che quasi certamente NON corrisponde a un file reale sulla tua macchina — impostalo.
+
     Se le dipendenze non sono installate, solleviamo un RuntimeError CHIARO con le
     istruzioni, invece di un ImportError oscuro.
     """
+    if voce_piper is None:
+        import os
+        voce_piper = os.environ.get("JARVIS_PIPER_MODEL", "it_IT-riccardo-x_low.onnx")
+
     try:
         import numpy as np
         import sounddevice as sd

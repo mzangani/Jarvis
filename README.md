@@ -165,6 +165,8 @@ Le chiamate all'API sono resistenti ai guasti:
 | `JARVIS_LOG` | File JSONL delle tool call | `~/Jarvis-Sandbox/jarvis.jsonl` |
 | `JARVIS_API_RETRIES` | Ritentativi SDK sugli errori transitori (≥ 0) | `4` |
 | `JARVIS_API_TIMEOUT` | Timeout in secondi sulla richiesta API (> 0) | default SDK |
+| `JARVIS_VOICE` | Attiva la modalità voce (Fase 6, opzionale) | disattivata |
+| `JARVIS_PIPER_MODEL` | Percorso del modello voce piper (.onnx) per il TTS | nome di comodo (da impostare) |
 
 Tutte le opzionali sono documentate anche in [`.env.example`](.env.example).
 
@@ -218,8 +220,13 @@ audio. Il core resta a 3 dipendenze. Per usarla:
 # 1. dipendenze audio (separate dal core) + il programma piper con un modello voce
 pip install -r requirements-voice.txt
 #    piper: vedi https://github.com/rhasspy/piper (binario + modello voce .onnx)
+#    scarica anche un modello voce italiano, es. it_IT-riccardo-x_low.onnx
 
-# 2. avvia in modalità voce
+# 2. dì a Jarvis dove sta il modello voce (percorso ESATTO, estensione .onnx inclusa:
+#    piper non lo indovina da un nome logico)
+export JARVIS_PIPER_MODEL=/percorso/a/it_IT-riccardo-x_low.onnx
+
+# 3. avvia in modalità voce
 python main.py --voce        # oppure:  JARVIS_VOICE=1 python main.py
 ```
 
