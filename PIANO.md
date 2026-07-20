@@ -54,7 +54,7 @@ TTS (piper). Wake word semplice. Deve restare disattivabile con un flag.
 > **in locale**: serve hardware audio (microfono/altoparlanti) non disponibile in un
 > ambiente cloud headless.
 
-### ⏳ FASE 7 — Rifinitura
+### ✅ FASE 7 — Rifinitura
 Consolidamento, stdlib-only. Spezzata in sotto-passi:
 - ✅ **7a — `logger.py`**: ogni tool call loggata su file JSONL (`quando`, `tool`, `input`,
   `output` troncato, `is_error`, `esito` ok/errore/rifiutato, `durata_ms`, `rischio`), in
@@ -72,8 +72,12 @@ Consolidamento, stdlib-only. Spezzata in sotto-passi:
   cronologia coerente qualunque cosa vada storta a metà turno (errore API, EOFError da una
   conferma, guardia `pause_turn`, troncamento `max_tokens` con tool_use spaiato). Rete di
   sicurezza in `main.py` (except largo, fail loud) come difesa in profondità.
-- ⏳ **7c — README + esempi**: README con setup, architettura e diagramma del loop, più
-  3 comandi di esempio funzionanti end-to-end.
+- ✅ **7c — README + esempi**: `README.md` in italiano con cos'è, setup avviabile,
+  architettura (moduli + diagramma Mermaid del loop), elenco dei tool, sicurezza/sandbox,
+  memoria, osservabilità, robustezza, tabella variabili d'ambiente, 3 esempi end-to-end e
+  limiti noti. Aggiunto `smoke_test.py` (stdlib, senza chiave/rete): verifica a secco che
+  import, registro dei tool e un tool SAFE reggano. `.env.example` completato con
+  `JARVIS_SANDBOX`.
 
 ## Mappa branch ↔ fasi
 
