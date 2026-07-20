@@ -61,6 +61,10 @@ Jarvis resta testuale e il core resta a 3 dipendenze.
   classe pura `RilevatoreFine` (testata senza audio); `JARVIS_VAD=0` torna alla finestra
   fissa, `JARVIS_VAD_SOGLIA` regola la sensibilità. Diagnostica LOUD: sia `say` sia `piper`
   mostrano lo stderr del comando quando falliscono (niente crash muti).
+- **Resa parlata**: in voce il system prompt guadagna un blocco (`SYSTEM_VOCE`) che chiede
+  risposte BREVI e SENZA formattazione (il registro "da schermo" verrebbe letto malissimo);
+  e `pulisci_per_voce` (pura, testata) toglie comunque markdown/emoji/URL prima del TTS. Su
+  macOS `say` sceglie da solo una voce italiana se `JARVIS_SAY_VOICE` non è impostata.
 - **Collaudato**: su macOS gira end-to-end con `say`. **Da rifinire in locale**: i backend
   `piper` (serve il binario giusto per l'architettura) e la **conferma VOCALE** delle azioni
   CAUTION/DANGEROUS (ora passa ancora dalla tastiera).

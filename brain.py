@@ -143,6 +143,20 @@ dice: proponi allora un'alternativa, non insistere.
 Non fingere mai di aver eseguito un'azione che non puoi eseguire, e non dichiarare
 riuscita un'azione il cui tool ha restituito un errore."""
 
+# Blocco AGGIUNTIVO per la MODALITÀ VOCE (Fase 6). Le risposte vengono LETTE ad alta voce
+# da un sintetizzatore: il registro "da schermo" (elenchi, grassetti, codice) suona malissimo.
+# Lo appendiamo al system prompt solo quando Jarvis è pilotato a voce (Agent.modalita_voce).
+SYSTEM_VOCE = """
+
+MODALITÀ VOCE. Le tue risposte vengono LETTE AD ALTA VOCE da un sintetizzatore vocale.
+Adatta il REGISTRO di conseguenza:
+- Rispondi BREVE e discorsivo, come PARLERESTI, non come scriveresti. Una o due frasi quando bastano.
+- NIENTE formattazione: nessun elenco puntato o numerato, nessun grassetto o asterischi,
+  nessun titolo, nessun blocco di codice, nessun emoji, nessun URL letto per intero.
+- Se devi elencare più cose, dille a parole ("prima..., poi..., infine...") senza puntini.
+- Numeri, date e unità in forma leggibile e naturale, non simbolica.
+Il senso resta lo stesso: cambia solo il modo, pensato per essere ASCOLTATO."""
+
 
 # System prompt DEDICATO al riassuntore della memoria BREVE (Fase 5b). Non è Jarvis:
 # è un compito separato, "comprimi questa conversazione conservandone il senso".
@@ -238,6 +252,10 @@ class Agent:
             opzioni_client["timeout"] = _API_TIMEOUT
         self.client = Anthropic(**opzioni_client)  # legge la chiave da ANTHROPIC_API_KEY
         self.messages: list[dict] = []
+        # MODALITÀ VOCE (Fase 6): quando True, il system prompt guadagna il blocco SYSTEM_VOCE
+        # (risposte brevi e senza formattazione, adatte a essere lette a voce). Lo attiva
+        # `voice.avvia_voce`; in modalità testo resta False e nulla cambia.
+        self.modalita_voce = False
         # Quanti token di INPUT ha usato l'ultima chiamata all'API in questo turno.
         # È il segnale (gratis, incluso in ogni risposta) per decidere se compattare
         # la cronologia a fine turno. 0 = nessuna chiamata ancora.
@@ -261,22 +279,28 @@ class Agent:
             # inventiamo fatti: lo dichiariamo apertamente nel prompt (loud) e andiamo
             # avanti a conversare. (Se l'utente prova comunque 'ricorda'/'richiama',
             # quei tool falliranno LOUD per conto loro, via il tool_result del loop.)
-            return (
+            prompt = (
                 SYSTEM_PROMPT
                 + "\n\n[Nota: la memoria persistente non è al momento disponibile "
                 f"({e}). Puoi conversare, ma non posso salvare né richiamare fatti.]"
             )
+        else:
+            if not fatti:
+                prompt = SYSTEM_PROMPT  # nessun fatto ancora: prompt base, senza blocco vuoto
+            else:
+                righe = "\n".join(f"- {f}" for f in fatti)
+                prompt = (
+                    SYSTEM_PROMPT
+                    + "\n\nCose che ricordi sull'utente (dalla memoria persistente; usa il "
+                    "tool 'richiama' se ti serve qualcosa che non è elencato qui):\n"
+                    + righe
+                )
 
-        if not fatti:
-            return SYSTEM_PROMPT  # nessun fatto ancora: prompt base, senza blocco vuoto
-
-        righe = "\n".join(f"- {f}" for f in fatti)
-        return (
-            SYSTEM_PROMPT
-            + "\n\nCose che ricordi sull'utente (dalla memoria persistente; usa il "
-            "tool 'richiama' se ti serve qualcosa che non è elencato qui):\n"
-            + righe
-        )
+        # In modalità voce, aggiungiamo le istruzioni di registro "parlato" (SYSTEM_VOCE):
+        # risposte brevi e senza formattazione, adatte a essere lette a voce.
+        if self.modalita_voce:
+            prompt += SYSTEM_VOCE
+        return prompt
 
     def _riassumi(self, vecchi: list) -> str:
         """

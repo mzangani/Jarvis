@@ -265,6 +265,13 @@ rumoroso e parte da solo (o al contrario non ti sente), regola la sensibilità c
 `JARVIS_VAD_SOGLIA` (alzala se è troppo sensibile, abbassala se non ti sente); puoi
 tornare alla finestra fissa con `JARVIS_VAD=0`.
 
+In modalità voce Jarvis adatta anche il **registro**: risponde **breve e discorsivo, senza
+formattazione** (niente elenchi, grassetti, codice o emoji), perché il testo viene *letto*
+ad alta voce. E prima di parlare il testo viene comunque **ripulito** dai simboli residui,
+così il sintetizzatore non legge markdown ed emoji. Su macOS, se non imposti
+`JARVIS_SAY_VOICE`, Jarvis prova a scegliere da solo una **voce italiana** (meglio se ne hai
+installata una "Enhanced"/"Premium", che suona molto più naturale).
+
 > **Stato**: il flusso è testato (mock del ciclo + logica VAD pura) e su macOS funziona
 > end-to-end con `say`. Con piper i backend audio vanno **collaudati in locale** (servono
 > microfono/altoparlanti e il binario piper). Limite residuo: la conferma delle azioni

@@ -158,6 +158,64 @@ check("VAD: parlato continuo -> stop al tetto (20)", idx == 20, f"-> {idx}")
 
 
 # ============================================================================
+# TEST 6 — pulisci_per_voce: il testo "da schermo" non viene letto letterale
+# ============================================================================
+print("\n=== TEST 6: pulizia del testo per la voce ===")
+p = voice.pulisci_per_voce
+
+check("via i grassetti **", p("ecco **importante** qui") == "ecco importante qui", f"-> {p('ecco **importante** qui')!r}")
+check("via i backtick del codice inline", p("usa `python main.py`") == "usa python main.py", f"-> {p('usa `python main.py`')!r}")
+check("via i blocchi di codice ```",
+      p("prima\n```\nx = 1\nprint(x)\n```\ndopo").replace("\n", " ").split() == ["prima", "dopo"],
+      f"-> {p(chr(10).join(['prima','```','x=1','```','dopo']))!r}")
+check("elenco puntato -> frasi (niente trattini)",
+      "- " not in p("cose:\n- una\n- due"), f"-> {p('cose:' + chr(10) + '- una' + chr(10) + '- due')!r}")
+check("link markdown: tengo il testo, butto l'URL",
+      p("vedi [il sito](https://esempio.it) ora") == "vedi il sito ora",
+      f"-> {p('vedi [il sito](https://esempio.it) ora')!r}")
+check("URL nudo rimosso", "http" not in p("apri https://esempio.it/pagina grazie"),
+      f"-> {p('apri https://esempio.it/pagina grazie')!r}")
+check("titolo markdown # rimosso", p("# Titolo\ntesto").split("\n")[0] == "Titolo",
+      f"-> {p('# Titolo' + chr(10) + 'testo')!r}")
+check("emoji rimosse", p("ciao 👋 come va 😀") == "ciao come va", f"-> {p('ciao 👋 come va 😀')!r}")
+check("testo semplice invariato", p("Sono le nove e mezza.") == "Sono le nove e mezza.")
+check("stringa vuota -> vuota", p("") == "")
+
+
+# ============================================================================
+# TEST 7 — _parla ripulisce PRIMA di sintetizzare (integrazione col backend finto)
+# ============================================================================
+print("\n=== TEST 7: _parla ripulisce prima di parlare ===")
+ag = FintoAgent()
+backend, parlato = backend_da_frasi(["ciao", "esci"])
+# FintoAgent risponde "ho sentito: ciao" (niente markdown); iniettiamo invece markdown
+# chiamando _parla direttamente per verificare la ripulitura nel punto di sintesi.
+voice._parla(backend, "ecco **la** lista:\n- uno\n- due 🎉")
+# I newline restano (per 'say' sono pause naturali tra gli elementi): quello che conta è
+# che siano spariti markdown ed emoji. Confrontiamo sul testo con gli "a capo" normalizzati.
+check("_parla ha ripulito markdown/emoji prima di riprodurre",
+      parlato[-1].replace("\n", " ") == "ecco la lista: uno due", f"-> {parlato[-1]!r}")
+
+
+# ============================================================================
+# TEST 8 — _scegli_voce_da_elenco: sceglie una voce italiana, meglio se "premium"
+# ============================================================================
+print("\n=== TEST 8: scelta voce italiana (say -v ?) ===")
+ELENCO = (
+    "Alice               it_IT    # Ciao, mi chiamo Alice.\n"
+    "Daniel              en_GB    # Hello, my name is Daniel.\n"
+    "Luca (Premium)      it_IT    # Ciao, sono Luca.\n"
+    "Thomas              fr_FR    # Bonjour.\n"
+)
+check("sceglie la voce italiana Premium", voice._scegli_voce_da_elenco(ELENCO) == "Luca (Premium)",
+      f"-> {voice._scegli_voce_da_elenco(ELENCO)!r}")
+check("senza premium, prende la prima italiana",
+      voice._scegli_voce_da_elenco("Alice   it_IT   # x\nBob   en_US   # y") == "Alice")
+check("nessuna voce italiana -> None",
+      voice._scegli_voce_da_elenco("Daniel   en_GB   # x") is None)
+
+
+# ============================================================================
 print("\n" + "=" * 60)
 if FALLITI:
     print(f"RISULTATO: {len(FALLITI)} test FALLITI: {FALLITI}")

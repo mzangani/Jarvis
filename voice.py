@@ -22,11 +22,94 @@ Due principi guida (dettati da PIANO.md):
    verifichiamo solo il flusso e le decisioni, non il suono.
 """
 
+import re
 from dataclasses import dataclass
 from typing import Callable, Optional
 
 # Frasi che chiudono la sessione vocale (equivalente vocale di "esci" nella REPL testuale).
 FRASI_USCITA = {"esci", "exit", "quit", "stop", "ferma", "basta", "arrivederci"}
+
+# Emoji e pittogrammi vari: un sintetizzatore li leggerebbe come nomi ("faccina...") o li
+# storpierebbe. Copriamo i blocchi Unicode più comuni (non è esaustivo, ma prende il grosso).
+_EMOJI = re.compile(
+    "["
+    "\U0001F300-\U0001FAFF"  # simboli & pittogrammi, emoticon, oggetti, ecc.
+    "\U00002600-\U000027BF"  # simboli vari & dingbats
+    "\U00002B00-\U00002BFF"  # frecce e simboli
+    "\U0001F1E6-\U0001F1FF"  # bandiere (regional indicators)
+    "\U0000FE00-\U0000FE0F"  # selettori di variazione
+    "\U00002190-\U000021FF"  # frecce
+    "\U00002700-\U000027BF"
+    "]+",
+    flags=re.UNICODE,
+)
+
+
+def pulisci_per_voce(testo: str) -> str:
+    """
+    Ripulisce il testo PRIMA di darlo al sintetizzatore, così NON legge la formattazione
+    "a voce alta". È una funzione PURA (nessun audio): togliamo ciò che ha senso a schermo
+    ma è rumore parlato — blocchi di codice, grassetti/asterischi, elenchi puntati, titoli
+    markdown, link, emoji — e normalizziamo gli spazi.
+
+    Non pretende di essere un parser markdown completo: è una ripulitura ROBUSTA e onesta
+    per la sintesi vocale, pensata per le risposte tipiche di Jarvis.
+    """
+    if not testo:
+        return ""
+    t = testo
+    # 1) Blocchi di codice ``` ... ```: leggerli a voce è inutile. Via del tutto.
+    t = re.sub(r"```.*?```", " ", t, flags=re.DOTALL)
+    # 2) Immagini e link markdown: teniamo il testo, buttiamo l'URL. ![alt](u) / [testo](u)
+    t = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", t)
+    # 3) URL "nudi": in voce non servono (e verrebbero sillabati). Via.
+    t = re.sub(r"https?://\S+", " ", t)
+    # 4) Codice inline `x`: togliamo solo i backtick, teniamo il contenuto.
+    t = t.replace("`", "")
+    # 5) Enfasi in coppia **grassetto** / __grassetto__: togliamo i marcatori.
+    t = re.sub(r"\*\*([^*]+)\*\*", r"\1", t)
+    t = re.sub(r"__([^_]+)__", r"\1", t)
+    # 6) A inizio riga: titoli (#), citazioni (>) e marcatori di elenco (-, *, +, •, "1.").
+    #    Diventano frasi normali; il "a capo" fa già da pausa per il sintetizzatore.
+    t = re.sub(r"(?m)^[ \t]*#{1,6}[ \t]+", "", t)      # titoli
+    t = re.sub(r"(?m)^[ \t]*>[ \t]?", "", t)            # citazioni
+    t = re.sub(r"(?m)^[ \t]*[-*+•][ \t]+", "", t)       # elenchi puntati
+    t = re.sub(r"(?m)^[ \t]*\d+[.)][ \t]+", "", t)      # elenchi numerati
+    # 7) Asterischi/underscore rimasti (enfasi singola, ecc.): a spazio, non incollare parole.
+    t = re.sub(r"[*_]+", " ", t)
+    # 8) Emoji e pittogrammi.
+    t = _EMOJI.sub("", t)
+    # 9) Normalizza spazi: niente run di spazi, e max una riga vuota di separazione.
+    t = re.sub(r"[ \t]+", " ", t)
+    t = re.sub(r"\n{3,}", "\n\n", t)
+    return t.strip()
+
+
+def _scegli_voce_da_elenco(elenco: str) -> Optional[str]:
+    """
+    Data l'uscita di `say -v '?'`, sceglie una voce ITALIANA (lingua it_*), preferendo
+    quelle di qualità superiore ("Premium"/"Enhanced", che suonano molto meglio). Ritorna
+    il NOME della voce, o None se non c'è nessuna voce italiana. PURA e testabile: il
+    comando `say` vero lo lancia chi la usa, qui parsiamo solo il testo.
+
+    Formato tipico di una riga:  "Alice               it_IT    # Ciao, mi chiamo Alice."
+    (il nome può contenere spazi o parentesi, es. "Alice (Enhanced)"): separiamo sul codice
+    lingua `xx_XX`, preceduto da almeno due spazi.
+    """
+    italiane = []
+    for riga in elenco.splitlines():
+        m = re.match(r"^(?P<nome>.+?)\s{2,}(?P<lang>[a-z]{2}_[A-Z]{2})\b", riga)
+        if not m:
+            continue
+        if m.group("lang").startswith("it"):
+            italiane.append(m.group("nome").strip())
+    if not italiane:
+        return None
+    # Preferiamo una voce di qualità superiore, se c'è; altrimenti la prima italiana.
+    for voce in italiane:
+        if re.search(r"premium|enhanced", voce, flags=re.IGNORECASE):
+            return voce
+    return italiane[0]
 
 
 @dataclass
@@ -47,8 +130,9 @@ class BackendVocale:
 
 
 def _parla(backend: BackendVocale, testo: str) -> None:
-    """Sintetizza e riproduce una frase. Salta se il testo è vuoto (niente da dire)."""
-    testo = (testo or "").strip()
+    """Sintetizza e riproduce una frase, dopo averla RIPULITA per la voce (niente
+    markdown/emoji letti a voce). Salta se non resta nulla da dire."""
+    testo = pulisci_per_voce(testo)
     if not testo:
         return
     backend.riproduci(backend.sintetizza(testo))
@@ -299,6 +383,17 @@ def crea_backend_reali(
         # pronunciare a `say`, che legge il testo da stdin (niente limiti di ARG_MAX
         # né problemi di quoting). Voce opzionale via JARVIS_SAY_VOICE.
         voce_say = os.environ.get("JARVIS_SAY_VOICE", "").strip()
+        # Se l'utente non ha scelto una voce, proviamo a trovarne una ITALIANA (la voce di
+        # sistema è spesso inglese e pronuncia male l'italiano). Best-effort: se `say -v ?`
+        # non è interrogabile, restiamo sulla voce di sistema senza far fallire nulla.
+        if not voce_say:
+            import subprocess
+            try:
+                elenco = subprocess.run(["say", "-v", "?"], capture_output=True,
+                                        timeout=5).stdout.decode("utf-8", errors="replace")
+                voce_say = _scegli_voce_da_elenco(elenco) or ""
+            except (OSError, subprocess.SubprocessError):
+                voce_say = ""  # nessuna scelta automatica: voce di sistema
 
         def sintetizza(testo: str):
             return testo
@@ -363,6 +458,10 @@ def avvia_voce(agent, *, console=None, wake_word: Optional[str] = None) -> None:
     mostrare lo stato a schermo: coerente con l'architettura, la logica non stampa da sé.
     """
     backend = crea_backend_reali()  # può sollevare RuntimeError (deps mancanti)
+
+    # Diciamo all'agente che ora parla a VOCE: risponderà breve e senza formattazione
+    # (il registro "da schermo" verrebbe letto malissimo). In testo questo resta False.
+    agent.modalita_voce = True
 
     def on_stato(messaggio: str) -> None:
         if console is not None:
