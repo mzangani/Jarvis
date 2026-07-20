@@ -123,26 +123,41 @@ def crea_backend_reali(
     sample_rate: int = 16000,
     modello_whisper: str = "base",
     voce_piper: Optional[str] = None,
+    motore_tts: Optional[str] = None,
 ) -> BackendVocale:
     """
     Costruisce i backend audio REALI, facendo import GUARDATI delle librerie opzionali.
 
     ⚠️ DA COLLAUDARE IN LOCALE. Questo ambiente cloud è headless (niente microfono/
     altoparlanti), quindi questa funzione qui non è eseguibile: i dettagli (durata di
-    ascolto, sample rate, nome dei modelli, invocazione di piper) sono un PUNTO DI
+    ascolto, sample rate, nome dei modelli, invocazione del TTS) sono un PUNTO DI
     PARTENZA ragionevole da verificare e rifinire sulla tua macchina.
 
-    `voce_piper` è il PERCORSO del modello voce (il file .onnx scaricato, estensione
-    inclusa: piper non lo indovina da un nome logico). Se non passato esplicitamente,
-    si legge da `JARVIS_PIPER_MODEL`; in mancanza di entrambi si usa un nome di comodo
-    che quasi certamente NON corrisponde a un file reale sulla tua macchina — impostalo.
+    STT (voce→testo): sempre faster-whisper + sounddevice (microfono).
 
-    Se le dipendenze non sono installate, solleviamo un RuntimeError CHIARO con le
+    TTS (testo→voce): due motori possibili, scelti da `motore_tts` (o `JARVIS_TTS`):
+      - "say"   → il comando `say` INTEGRATO in macOS: nessun binario esterno né modello
+                  da scaricare, arm64-nativo, zero problemi di architettura. Voce via
+                  `JARVIS_SAY_VOICE` (es. "Alice"/"Luca" per l'italiano; default: di sistema).
+      - "piper" → il binario esterno `piper` con un modello voce .onnx (TTS neurale
+                  locale, multipiattaforma). `voce_piper` è il PERCORSO del modello .onnx
+                  (estensione inclusa: piper non lo indovina da un nome logico); se non
+                  passato si legge da `JARVIS_PIPER_MODEL`.
+      - "auto"  → default: "say" su macOS, "piper" altrove.
+
+    Se le dipendenze STT non sono installate, solleviamo un RuntimeError CHIARO con le
     istruzioni, invece di un ImportError oscuro.
     """
+    import os
+    import platform
+
     if voce_piper is None:
-        import os
         voce_piper = os.environ.get("JARVIS_PIPER_MODEL", "it_IT-riccardo-x_low.onnx")
+    if motore_tts is None:
+        motore_tts = os.environ.get("JARVIS_TTS", "auto").strip().lower()
+    if motore_tts == "auto":
+        # Su un Mac 'say' è sempre presente e nativo: è il default ovvio. Altrove piper.
+        motore_tts = "say" if platform.system() == "Darwin" else "piper"
 
     try:
         import numpy as np
@@ -177,36 +192,63 @@ def crea_backend_reali(
         segmenti, _info = modello.transcribe(audio, language="it")
         return " ".join(seg.text for seg in segmenti).strip()
 
-    def sintetizza(testo: str):
-        # TTS con piper via CLI (più stabile della sua API Python): testo -> WAV (bytes).
-        # Richiede il binario 'piper' e un modello voce .onnx (vedi README/requirements).
-        import subprocess
-        proc = subprocess.run(
-            ["piper", "--model", voce_piper, "--output_file", "-"],
-            input=testo.encode("utf-8"),
-            capture_output=True,
-            # NIENTE check=True: CalledProcessError non mostra stderr nel traceback di
-            # default, e senza lo stderr di piper (crash C++, modello mancante, ecc.) la
-            # diagnosi è alla cieca. Controlliamo a mano e lo includiamo nel messaggio.
-        )
-        if proc.returncode != 0:
-            dettaglio = proc.stderr.decode("utf-8", errors="replace").strip()
-            raise RuntimeError(
-                f"piper è fallito (codice {proc.returncode}, segnale se negativo): "
-                f"{dettaglio or '(nessun messaggio su stderr)'}"
-            )
-        return proc.stdout  # bytes di un file WAV
+    # ---- TTS: due motori. Definiamo sintetizza/riproduci in base a `motore_tts`. ----
+    if motore_tts == "say":
+        # macOS 'say': parla direttamente, senza binari esterni né problemi di
+        # architettura. Nel nostro modello a due passi (sintetizza -> riproduci)
+        # sintetizza è l'IDENTITÀ (il "suono" è il testo stesso) e riproduci lo fa
+        # pronunciare a `say`, che legge il testo da stdin (niente limiti di ARG_MAX
+        # né problemi di quoting). Voce opzionale via JARVIS_SAY_VOICE.
+        voce_say = os.environ.get("JARVIS_SAY_VOICE", "").strip()
 
-    def riproduci(audio_wav) -> None:
-        # Riproduce i byte WAV prodotti da piper sull'altoparlante.
-        import io
-        import wave
-        with wave.open(io.BytesIO(audio_wav), "rb") as w:
-            frame = w.readframes(w.getnframes())
-            sr = w.getframerate()
-        dati = np.frombuffer(frame, dtype=np.int16)
-        sd.play(dati, samplerate=sr)
-        sd.wait()
+        def sintetizza(testo: str):
+            return testo
+
+        def riproduci(testo) -> None:
+            import subprocess
+            cmd = ["say"]
+            if voce_say:
+                cmd += ["-v", voce_say]
+            proc = subprocess.run(cmd, input=(testo or "").encode("utf-8"),
+                                  capture_output=True)
+            if proc.returncode != 0:
+                dettaglio = proc.stderr.decode("utf-8", errors="replace").strip()
+                raise RuntimeError(
+                    f"il comando 'say' è fallito (codice {proc.returncode}): "
+                    f"{dettaglio or '(nessun messaggio su stderr)'}"
+                )
+    else:
+        # piper: binario esterno + modello .onnx (TTS neurale locale). Produce un WAV
+        # in memoria, che riproduci() suona via sounddevice.
+        def sintetizza(testo: str):
+            import subprocess
+            proc = subprocess.run(
+                ["piper", "--model", voce_piper, "--output_file", "-"],
+                input=testo.encode("utf-8"),
+                capture_output=True,
+                # NIENTE check=True: CalledProcessError non mostra stderr nel traceback
+                # di default, e senza lo stderr di piper (crash C++, modello mancante,
+                # architettura sbagliata, ecc.) la diagnosi è alla cieca. Controlliamo a
+                # mano e lo includiamo nel messaggio.
+            )
+            if proc.returncode != 0:
+                dettaglio = proc.stderr.decode("utf-8", errors="replace").strip()
+                raise RuntimeError(
+                    f"piper è fallito (codice {proc.returncode}, segnale se negativo): "
+                    f"{dettaglio or '(nessun messaggio su stderr)'}"
+                )
+            return proc.stdout  # bytes di un file WAV
+
+        def riproduci(audio_wav) -> None:
+            # Riproduce i byte WAV prodotti da piper sull'altoparlante.
+            import io
+            import wave
+            with wave.open(io.BytesIO(audio_wav), "rb") as w:
+                frame = w.readframes(w.getnframes())
+                sr = w.getframerate()
+            dati = np.frombuffer(frame, dtype=np.int16)
+            sd.play(dati, samplerate=sr)
+            sd.wait()
 
     return BackendVocale(
         ascolta=ascolta, trascrivi=trascrivi, sintetizza=sintetizza, riproduci=riproduci

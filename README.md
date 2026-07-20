@@ -166,6 +166,8 @@ Le chiamate all'API sono resistenti ai guasti:
 | `JARVIS_API_RETRIES` | Ritentativi SDK sugli errori transitori (≥ 0) | `4` |
 | `JARVIS_API_TIMEOUT` | Timeout in secondi sulla richiesta API (> 0) | default SDK |
 | `JARVIS_VOICE` | Attiva la modalità voce (Fase 6, opzionale) | disattivata |
+| `JARVIS_TTS` | Motore TTS della voce: `say` (macOS), `piper`, o `auto` | `auto` (→ `say` su macOS) |
+| `JARVIS_SAY_VOICE` | Voce del comando `say` su macOS (es. `Alice`, `Luca`) | voce di sistema |
 | `JARVIS_PIPER_MODEL` | Percorso del modello voce piper (.onnx) per il TTS | nome di comodo (da impostare) |
 
 Tutte le opzionali sono documentate anche in [`.env.example`](.env.example).
@@ -214,30 +216,52 @@ Jarvis può funzionare **a voce**: microfono → riconoscimento vocale (STT) →
 (`voice.py`): il loop non cambia.
 
 È **opzionale e disattivata di default**, perché richiede dipendenze pesanti e hardware
-audio. Il core resta a 3 dipendenze. Per usarla:
+audio. Il core resta a 3 dipendenze.
+
+L'**ingresso** (microfono → testo) usa sempre `faster-whisper` + `sounddevice`. L'**uscita**
+(testo → voce, TTS) ha invece **due motori**, scelti automaticamente o via `JARVIS_TTS`:
+
+- **`say` (macOS)** — il sintetizzatore **integrato** in macOS: nessun binario esterno né
+  modello da scaricare, nativo Apple Silicon, zero grattacapi. **È il default sul Mac.**
+- **`piper`** — TTS neurale locale multipiattaforma (binario esterno + modello voce `.onnx`).
+  Il default fuori da macOS, o se imposti `JARVIS_TTS=piper`.
+
+**Setup comune (STT, sempre):**
 
 ```bash
-# 1. dipendenze audio (separate dal core) + il programma piper con un modello voce
 pip install -r requirements-voice.txt
-#    piper: vedi https://github.com/rhasspy/piper (binario + modello voce .onnx)
-#    scarica anche un modello voce italiano, es. it_IT-riccardo-x_low.onnx
+```
 
-# 2. dì a Jarvis dove sta il modello voce (percorso ESATTO, estensione .onnx inclusa:
-#    piper non lo indovina da un nome logico)
-export JARVIS_PIPER_MODEL=/percorso/a/it_IT-riccardo-x_low.onnx
+**Su macOS (consigliato, con `say`):** non serve altro. Opzionale: scegli una voce italiana.
 
-# 3. avvia in modalità voce
-python main.py --voce        # oppure:  JARVIS_VOICE=1 python main.py
+```bash
+# (opzionale) elenca le voci disponibili e installane una italiana da
+# Impostazioni di Sistema › Accessibilità › Contenuti pronunciati › Voce di sistema
+say -v '?' | grep it_IT           # es. Alice, Luca
+export JARVIS_SAY_VOICE=Alice     # senza questa, usa la voce di sistema
+
+python main.py --voce             # oppure:  JARVIS_VOICE=1 python main.py
+```
+
+**Con piper (Linux, o macOS se preferisci il TTS neurale):**
+
+```bash
+# il programma piper + un modello voce .onnx: vedi https://github.com/rhasspy/piper
+#   scarica il modello e il suo file .onnx.json accanto (stesso nome base)
+#   su Linux serve anche espeak-ng (es. `sudo apt-get install espeak-ng`)
+export JARVIS_PIPER_MODEL=/percorso/a/it_IT-riccardo-x_low.onnx   # percorso ESATTO, .onnx incluso
+export JARVIS_TTS=piper          # solo se vuoi forzare piper su un Mac
+python main.py --voce
 ```
 
 Di' **«esci»** per terminare. Se le dipendenze audio mancano, Jarvis te lo dice e
 **ripiega automaticamente sulla modalità testo**.
 
 > **Stato**: lo *scheletro* è pronto e il flusso non-audio è testato; i backend audio
-> reali (faster-whisper, piper, sounddevice) sono un punto di partenza da **collaudare e
-> rifinire in locale**, perché servono microfono e altoparlanti. Limiti attuali: ascolto a
-> finestra fissa (non ancora rilevazione del silenzio) e la conferma delle azioni
-> CAUTION/DANGEROUS passa ancora dalla tastiera.
+> reali sono un punto di partenza da **collaudare e rifinire in locale**, perché servono
+> microfono e altoparlanti. Limiti attuali: ascolto a finestra fissa (non ancora
+> rilevazione del silenzio) e la conferma delle azioni CAUTION/DANGEROUS passa ancora
+> dalla tastiera.
 
 ## Verifica rapida (smoke-test)
 

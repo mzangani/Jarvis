@@ -114,4 +114,6 @@ della fase in corso.
 | `JARVIS_API_RETRIES`| Ritentativi SDK sugli errori transitori (FASE 7b, >= 0)  | `4`                                  |
 | `JARVIS_API_TIMEOUT`| Timeout in secondi sulla richiesta API (FASE 7b, > 0)    | default SDK                          |
 | `JARVIS_VOICE`      | Attiva la modalità voce (FASE 6, opzionale)              | disattivata                          |
+| `JARVIS_TTS`        | Motore TTS: `say` (macOS), `piper`, o `auto`             | `auto` (→ `say` su macOS)            |
+| `JARVIS_SAY_VOICE`  | Voce del comando `say` su macOS (es. `Alice`, `Luca`)    | voce di sistema                      |
 | `JARVIS_PIPER_MODEL`| Percorso del modello voce piper (.onnx) per il TTS       | nome di comodo (da impostare)        |
