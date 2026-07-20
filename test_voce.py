@@ -116,6 +116,48 @@ check("si ferma a max_giri (3 chiamate)", len(ag.ricevuti) == 3, f"-> {len(ag.ri
 
 
 # ============================================================================
+# TEST 5 — RilevatoreFine (VAD): la logica di rilevazione del silenzio, senza audio
+# ============================================================================
+# Usiamo numeri "puliti" per rendere ovvi i conteggi: blocco=0.1s, così
+#   silenzio_fine=0.3 -> 3 blocchi di silenzio chiudono la frase,
+#   attesa_inizio=1.0 -> 10 blocchi senza voce chiudono (frase vuota),
+#   durata_massima=2.0 -> 20 blocchi è il tetto assoluto.
+print("\n=== TEST 5: VAD (RilevatoreFine) ===")
+PARAMETRI = dict(blocco=0.1, silenzio_fine=0.3, attesa_inizio=1.0, durata_massima=2.0)
+FORTE, DEBOLE = 1.0, 0.0  # energie ben sopra/sotto la soglia
+SOGLIA = 0.5
+
+
+def conta_fino_a_stop(energie):
+    """Alimenta il rilevatore con la sequenza di energie; ritorna (indice_di_stop 1-based,
+    parlato_iniziato). Se non si ferma entro la sequenza, indice = None."""
+    r = voice.RilevatoreFine(soglia=SOGLIA, **PARAMETRI)
+    for i, e in enumerate(energie, start=1):
+        if r.considera(e):
+            return i, r.parlato_iniziato
+    return None, r.parlato_iniziato
+
+
+# 5a — solo silenzio: si chiude allo scadere dell'attesa (10° blocco), senza parlato.
+idx, iniziato = conta_fino_a_stop([DEBOLE] * 50)
+check("VAD: solo silenzio -> stop all'attesa (10)", idx == 10, f"-> {idx}")
+check("VAD: solo silenzio -> nessun parlato", iniziato is False, f"-> {iniziato}")
+
+# 5b — parlato poi silenzio: 5 blocchi forti, poi silenzio; chiude al 3° silenzio (8° blocco).
+idx, iniziato = conta_fino_a_stop([FORTE] * 5 + [DEBOLE] * 50)
+check("VAD: parlato+silenzio -> stop al 3° silenzio (8)", idx == 8, f"-> {idx}")
+check("VAD: parlato+silenzio -> parlato iniziato", iniziato is True, f"-> {iniziato}")
+
+# 5c — pausa BREVE non taglia: forte, 2 silenzi (<3), forte, poi 3 silenzi -> stop al 9°.
+idx, _ = conta_fino_a_stop([FORTE] * 3 + [DEBOLE] * 2 + [FORTE] * 1 + [DEBOLE] * 3 + [FORTE] * 20)
+check("VAD: pausa breve non chiude (stop al 9)", idx == 9, f"-> {idx}")
+
+# 5d — parlato continuo: nessun silenzio -> si ferma solo al tetto massimo (20° blocco).
+idx, _ = conta_fino_a_stop([FORTE] * 100)
+check("VAD: parlato continuo -> stop al tetto (20)", idx == 20, f"-> {idx}")
+
+
+# ============================================================================
 print("\n" + "=" * 60)
 if FALLITI:
     print(f"RISULTATO: {len(FALLITI)} test FALLITI: {FALLITI}")

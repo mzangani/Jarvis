@@ -93,6 +93,14 @@ import voice
 check("import voice funziona senza dipendenze audio", True)
 check("ciclo_vocale e crea_backend_reali esistono",
       hasattr(voice, "ciclo_vocale") and hasattr(voice, "crea_backend_reali"))
+# La logica di rilevazione del silenzio (VAD) è pura: la esercitiamo a secco, senza audio.
+check("RilevatoreFine esiste", hasattr(voice, "RilevatoreFine"))
+_r = voice.RilevatoreFine(soglia=0.5, blocco=0.1, silenzio_fine=0.3,
+                          attesa_inizio=1.0, durata_massima=2.0)
+# Solo silenzio (energia 0): si deve fermare all'attesa (10° blocco), senza "parlato".
+_stop_a = next((i for i in range(1, 100) if _r.considera(0.0)), None)
+check("RilevatoreFine: solo silenzio -> stop all'attesa", _stop_a == 10, f"-> {_stop_a}")
+check("RilevatoreFine: nessun parlato sul silenzio", _r.parlato_iniziato is False)
 # Senza le librerie audio installate, crea_backend_reali deve fallire con un messaggio
 # CHIARO (RuntimeError con le istruzioni), non un ImportError oscuro. Se invece qui le
 # librerie ci fossero, saltiamo il controllo (non è un errore).

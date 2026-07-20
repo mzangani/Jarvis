@@ -46,17 +46,24 @@ Quattro famiglie in `tools/`:
   confini sicuri (inizio di un vero turno utente, mai dentro una coppia
   tool_use/tool_result). Visibile via callback `on_note`.
 
-### 💤 FASE 6 — Voce (OPZIONALE) — scheletro pronto, audio da collaudare in locale
+### 💤 FASE 6 — Voce (OPZIONALE) — funzionante su macOS, piper da rifinire in locale
 Wrapper attorno al loop, senza toccarlo (`voice.py`): microfono → STT → `agent.chat` →
 TTS → altoparlante. Disattivabile: opt-in con `--voce` o `JARVIS_VOICE=1`, altrimenti
 Jarvis resta testuale e il core resta a 3 dipendenze.
-- **Fatto qui**: l'orchestrazione `ciclo_vocale` (con wake word e frasi d'uscita), scritta
-  contro BACKEND iniettabili → testata su MOCK del flusso non-audio; import GUARDATI in
+- **Orchestrazione**: `ciclo_vocale` (con wake word e frasi d'uscita), scritta contro
+  BACKEND iniettabili → testata su MOCK del flusso non-audio. Import GUARDATI in
   `crea_backend_reali` (se le deps mancano → messaggio chiaro + ripiego sul testo in
-  `main.py`); `requirements-voice.txt` separato; smoke-test che verifica il design guardato.
-- **Da fare in locale**: collaudare/rifinire i backend audio reali (faster-whisper, piper,
-  sounddevice) — servono microfono/altoparlanti, assenti in un ambiente cloud headless —
-  e migliorare ascolto (rilevazione del silenzio) e conferma vocale delle azioni.
+  `main.py`); `requirements-voice.txt` separato.
+- **STT**: faster-whisper + sounddevice (microfono). **TTS a due motori** (`JARVIS_TTS`):
+  `say` INTEGRATO in macOS (default sul Mac: nessun binario esterno, nativo arm64) oppure
+  `piper` (TTS neurale, binario + modello `.onnx` via `JARVIS_PIPER_MODEL`), default altrove.
+- **Ascolto**: rilevazione del silenzio (VAD "a energia") — la DECISIONE è isolata in una
+  classe pura `RilevatoreFine` (testata senza audio); `JARVIS_VAD=0` torna alla finestra
+  fissa, `JARVIS_VAD_SOGLIA` regola la sensibilità. Diagnostica LOUD: sia `say` sia `piper`
+  mostrano lo stderr del comando quando falliscono (niente crash muti).
+- **Collaudato**: su macOS gira end-to-end con `say`. **Da rifinire in locale**: i backend
+  `piper` (serve il binario giusto per l'architettura) e la **conferma VOCALE** delle azioni
+  CAUTION/DANGEROUS (ora passa ancora dalla tastiera).
 > **Avvertenza**: le librerie audio sono l'ECCEZIONE al vincolo dipendenze (pesanti,
 > specifiche per OS): stanno in `requirements-voice.txt`, mai nel core.
 
@@ -117,3 +124,5 @@ della fase in corso.
 | `JARVIS_TTS`        | Motore TTS: `say` (macOS), `piper`, o `auto`             | `auto` (→ `say` su macOS)            |
 | `JARVIS_SAY_VOICE`  | Voce del comando `say` su macOS (es. `Alice`, `Luca`)    | voce di sistema                      |
 | `JARVIS_PIPER_MODEL`| Percorso del modello voce piper (.onnx) per il TTS       | nome di comodo (da impostare)        |
+| `JARVIS_VAD`        | Rilevazione del silenzio nell'ascolto (`0` = finestra fissa) | attiva                           |
+| `JARVIS_VAD_SOGLIA` | Sensibilità del VAD (energia RMS): più alta = meno sensibile | `0.015`                          |

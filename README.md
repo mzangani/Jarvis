@@ -169,6 +169,8 @@ Le chiamate all'API sono resistenti ai guasti:
 | `JARVIS_TTS` | Motore TTS della voce: `say` (macOS), `piper`, o `auto` | `auto` (→ `say` su macOS) |
 | `JARVIS_SAY_VOICE` | Voce del comando `say` su macOS (es. `Alice`, `Luca`) | voce di sistema |
 | `JARVIS_PIPER_MODEL` | Percorso del modello voce piper (.onnx) per il TTS | nome di comodo (da impostare) |
+| `JARVIS_VAD` | Rilevazione del silenzio nell'ascolto (`0` = finestra fissa) | attiva |
+| `JARVIS_VAD_SOGLIA` | Sensibilità del VAD (energia RMS): più alta = meno sensibile | `0.015` |
 
 Tutte le opzionali sono documentate anche in [`.env.example`](.env.example).
 
@@ -257,11 +259,16 @@ python main.py --voce
 Di' **«esci»** per terminare. Se le dipendenze audio mancano, Jarvis te lo dice e
 **ripiega automaticamente sulla modalità testo**.
 
-> **Stato**: lo *scheletro* è pronto e il flusso non-audio è testato; i backend audio
-> reali sono un punto di partenza da **collaudare e rifinire in locale**, perché servono
-> microfono e altoparlanti. Limiti attuali: ascolto a finestra fissa (non ancora
-> rilevazione del silenzio) e la conferma delle azioni CAUTION/DANGEROUS passa ancora
-> dalla tastiera.
+L'ascolto usa una **rilevazione del silenzio** (VAD "a energia"): Jarvis smette di
+registrare quando smetti di parlare, invece di una finestra fissa. Se il microfono è
+rumoroso e parte da solo (o al contrario non ti sente), regola la sensibilità con
+`JARVIS_VAD_SOGLIA` (alzala se è troppo sensibile, abbassala se non ti sente); puoi
+tornare alla finestra fissa con `JARVIS_VAD=0`.
+
+> **Stato**: il flusso è testato (mock del ciclo + logica VAD pura) e su macOS funziona
+> end-to-end con `say`. Con piper i backend audio vanno **collaudati in locale** (servono
+> microfono/altoparlanti e il binario piper). Limite residuo: la conferma delle azioni
+> CAUTION/DANGEROUS passa ancora dalla **tastiera** anche in modalità voce.
 
 ## Verifica rapida (smoke-test)
 

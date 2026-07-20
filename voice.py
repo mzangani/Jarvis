@@ -15,9 +15,11 @@ Due principi guida (dettati da PIANO.md):
 
 2) TESTABILE SENZA HARDWARE. L'orchestrazione (`ciclo_vocale`) è scritta contro un
    BACKEND iniettabile (ascolta/trascrivi/sintetizza/riproduci): con backend finti la
-   provi con dei mock, senza microfono né modelli. I backend REALI stanno in
-   `crea_backend_reali()` e vanno COLLAUDATI IN LOCALE — questo ambiente è headless
-   (niente audio), quindi qui verifichiamo solo il flusso, non il suono.
+   provi con dei mock, senza microfono né modelli. Anche la LOGICA di rilevazione del
+   silenzio è isolata in una classe pura (`RilevatoreFine`), testabile con delle sequenze
+   di energia senza audio. I backend REALI stanno in `crea_backend_reali()` e vanno
+   COLLAUDATI IN LOCALE — questo ambiente è headless (niente audio), quindi qui
+   verifichiamo solo il flusso e le decisioni, non il suono.
 """
 
 from dataclasses import dataclass
@@ -117,6 +119,68 @@ def ciclo_vocale(
         _parla(backend, risposta)
 
 
+class RilevatoreFine:
+    """
+    Rilevazione del silenzio (VAD "a energia"): decide QUANDO smettere di registrare,
+    così una frase non viene tagliata a metà né costringe ad aspettare una finestra fissa.
+
+    È PURA e TESTABILE: consuma una sequenza di valori di ENERGIA (RMS per blocco audio) e
+    non tocca l'hardware — la cattura vera dei blocchi la fa `ascolta()`. Macchina a due
+    stati:
+
+      - ATTESA: aspettiamo che la voce COMINCI. Se non arriva entro `attesa_inizio`,
+        chiudiamo comunque (nessun parlato → frase vuota → il ciclo riascolta).
+      - PARLATO: stiamo registrando. Ogni blocco "silenzioso" consecutivo avvicina la
+        fine; `silenzio_fine` secondi di silenzio di fila chiudono la frase. Un blocco
+        "parlato" AZZERA il conteggio del silenzio, così le pause brevi non tagliano.
+
+    In entrambi gli stati, `durata_massima` è un tetto assoluto (mai registrare all'infinito).
+    Le durate (in secondi) sono convertite in numero di blocchi tramite `blocco` (durata di
+    un blocco). Un'istanza serve per UNA frase: `ascolta()` ne crea una nuova a ogni giro.
+    """
+
+    def __init__(self, *, soglia: float, blocco: float, silenzio_fine: float,
+                 attesa_inizio: float, durata_massima: float) -> None:
+        self.soglia = soglia
+        # Da secondi a numero di blocchi (almeno 1, per non degenerare con blocchi grandi).
+        self._blocchi_silenzio_fine = max(1, round(silenzio_fine / blocco))
+        self._blocchi_attesa = max(1, round(attesa_inizio / blocco))
+        self._blocchi_massimi = max(1, round(durata_massima / blocco))
+        self._parlato_iniziato = False
+        self._silenzio_consecutivi = 0
+        self._totali = 0
+
+    @property
+    def parlato_iniziato(self) -> bool:
+        """True se a un certo punto la voce è cominciata (utile a chi chiama per capire
+        se la frase è 'vuota' — solo silenzio — o reale)."""
+        return self._parlato_iniziato
+
+    def considera(self, energia: float) -> bool:
+        """Registra un blocco data la sua energia RMS. Ritorna True quando si deve
+        SMETTERE di registrare (fine frase, timeout d'attesa, o tetto massimo)."""
+        self._totali += 1
+        parlato = energia >= self.soglia
+
+        if not self._parlato_iniziato:
+            if parlato:
+                self._parlato_iniziato = True
+            elif self._totali >= self._blocchi_attesa:
+                return True  # nessuno ha parlato entro l'attesa: chiudiamo (frase vuota)
+
+        if self._parlato_iniziato:
+            if parlato:
+                self._silenzio_consecutivi = 0
+            else:
+                self._silenzio_consecutivi += 1
+                if self._silenzio_consecutivi >= self._blocchi_silenzio_fine:
+                    return True  # abbastanza silenzio dopo il parlato: fine frase
+
+        if self._totali >= self._blocchi_massimi:
+            return True  # tetto assoluto: non registrare più a lungo di così
+        return False
+
+
 def crea_backend_reali(
     *,
     secondi_ascolto: float = 5.0,
@@ -159,6 +223,14 @@ def crea_backend_reali(
         # Su un Mac 'say' è sempre presente e nativo: è il default ovvio. Altrove piper.
         motore_tts = "say" if platform.system() == "Darwin" else "piper"
 
+    # Rilevazione del silenzio (VAD) per l'ASCOLTO: attiva di default, disattivabile con
+    # JARVIS_VAD=0 (ripiego sulla finestra fissa). La SOGLIA dipende dal microfono/rumore
+    # di fondo: se Jarvis parte a registrare da solo (troppo sensibile) alzala, se non ti
+    # sente (troppo alta) abbassala. Le altre durate hanno default sensati.
+    usa_vad = os.environ.get("JARVIS_VAD", "1").strip().lower() not in {"0", "false", "no", "off"}
+    vad_soglia = float(os.environ.get("JARVIS_VAD_SOGLIA", "0.015"))
+    vad_blocco = 0.03  # durata di un blocco audio (s): 30 ms, granularità comoda per il VAD
+
     try:
         import numpy as np
         import sounddevice as sd
@@ -175,9 +247,9 @@ def crea_backend_reali(
     # accuratezza/velocità; modelli più grandi sono più precisi ma più lenti e pesanti.
     modello = WhisperModel(modello_whisper)
 
-    def ascolta():
-        # VERSIONE SEMPLICE: registriamo una finestra di durata FISSA. In locale valuta
-        # una rilevazione del silenzio (VAD) per non tagliare le frasi lunghe/corte.
+    def _ascolta_finestra_fissa():
+        # RIPIEGO (JARVIS_VAD=0): registriamo una finestra di durata FISSA. Semplice ma
+        # taglia le frasi lunghe e fa aspettare su quelle corte.
         audio = sd.rec(
             int(secondi_ascolto * sample_rate),
             samplerate=sample_rate,
@@ -186,6 +258,33 @@ def crea_backend_reali(
         )
         sd.wait()  # blocca finché la registrazione non è finita
         return audio.reshape(-1)  # array mono 1-D, il formato che si aspetta whisper
+
+    def _ascolta_con_vad():
+        # Leggiamo a BLOCCHI e ci fermiamo quando il rilevatore dice "fine frase" (silenzio
+        # dopo il parlato), evitando la finestra fissa. Il rilevatore è nuovo a ogni frase
+        # (lo stato non va riusato). La logica di DECISIONE è pura (RilevatoreFine, testata);
+        # qui c'è solo la cattura dei blocchi dal microfono e il calcolo dell'energia.
+        dim_blocco = max(1, int(vad_blocco * sample_rate))  # campioni per blocco
+        rilevatore = RilevatoreFine(
+            soglia=vad_soglia, blocco=vad_blocco,
+            silenzio_fine=0.8, attesa_inizio=4.0, durata_massima=15.0,
+        )
+        blocchi = []
+        with sd.InputStream(samplerate=sample_rate, channels=1,
+                            dtype="float32", blocksize=dim_blocco) as stream:
+            while True:
+                dati, _overflow = stream.read(dim_blocco)  # blocco (dim_blocco, 1) float32
+                mono = dati.reshape(-1)
+                blocchi.append(mono)
+                energia = float(np.sqrt(np.mean(mono ** 2))) if mono.size else 0.0
+                if rilevatore.considera(energia):
+                    break
+        if not blocchi:
+            return np.zeros(0, dtype="float32")
+        return np.concatenate(blocchi)
+
+    def ascolta():
+        return _ascolta_con_vad() if usa_vad else _ascolta_finestra_fissa()
 
     def trascrivi(audio) -> str:
         # faster-whisper: transcribe() restituisce (segmenti, info); uniamo i testi.
