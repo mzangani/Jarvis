@@ -185,8 +185,16 @@ def crea_backend_reali(
             ["piper", "--model", voce_piper, "--output_file", "-"],
             input=testo.encode("utf-8"),
             capture_output=True,
-            check=True,  # fail loud: se piper fallisce, lo sappiamo
+            # NIENTE check=True: CalledProcessError non mostra stderr nel traceback di
+            # default, e senza lo stderr di piper (crash C++, modello mancante, ecc.) la
+            # diagnosi è alla cieca. Controlliamo a mano e lo includiamo nel messaggio.
         )
+        if proc.returncode != 0:
+            dettaglio = proc.stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(
+                f"piper è fallito (codice {proc.returncode}, segnale se negativo): "
+                f"{dettaglio or '(nessun messaggio su stderr)'}"
+            )
         return proc.stdout  # bytes di un file WAV
 
     def riproduci(audio_wav) -> None:
