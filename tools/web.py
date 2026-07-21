@@ -351,8 +351,37 @@ WEB_SEARCH = {
     "max_uses": 5,  # al massimo 5 ricerche per turno
 }
 
+# Variante BASE del web search, per i modelli che non supportano la _20260209
+# (es. Haiku 4.5): stessa capacità di ricerca, senza il filtraggio dinamico.
+WEB_SEARCH_BASE = {
+    "type": "web_search_20250305",
+    "name": "web_search",
+    "max_uses": 5,
+}
+
+# Prefissi dei modelli che supportano la variante _20260209 (filtraggio dinamico).
+# Fail closed: un modello NON in elenco riceve la variante base, che funziona ovunque.
+_MODELLI_SEARCH_NUOVA = (
+    "claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8",
+    "claude-sonnet-4-6", "claude-sonnet-5",
+)
+
+
+def server_tools_per_modello(modello: str) -> list:
+    """
+    I tool server-side giusti per il modello dato. Serve perché (Fase 10) Jarvis può
+    cambiare modello a runtime, e la VERSIONE del web search dipende dal modello:
+    dichiarare la variante nuova a un modello che non la supporta è un errore API.
+    """
+    if modello.startswith(_MODELLI_SEARCH_NUOVA):
+        return [WEB_SEARCH]
+    return [WEB_SEARCH_BASE]
+
+
 # Tool server-side esposti da questa famiglia. tools/__init__.py li raccoglie
 # (come fa con PRECHECKS) e brain.py li passa alla create() insieme agli SCHEMAS.
+# NB: con i LIVELLI (Fase 10) brain.py usa server_tools_per_modello(); questa lista
+# resta come default/compatibilità (è la variante per il modello "storico" sonnet).
 SERVER_TOOLS = [WEB_SEARCH]
 
 

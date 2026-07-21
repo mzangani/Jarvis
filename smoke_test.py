@@ -84,6 +84,14 @@ ag = brain.Agent()
 check("Agent() si costruisce", ag is not None)
 check("client configurato col retry (max_retries >= 1)", ag.client.max_retries >= 1)
 check("cronologia iniziale vuota", ag.messages == [])
+# Livelli di ragionamento (Fase 10): registro coerente, default valido, parametri puri.
+check("livelli: base/normale/profondo", set(brain.LIVELLI) == {"base", "normale", "profondo"})
+check("livello di partenza valido", ag.livello in brain.LIVELLI, f"-> {ag.livello}")
+check("profondo ha il thinking adattivo",
+      brain.parametri_livello("profondo").get("thinking") == {"type": "adaptive"})
+check("il web_search segue il modello (haiku -> variante base)",
+      tools.server_tools_per_modello(brain.LIVELLI["base"]["modello"])[0]["type"]
+      == "web_search_20250305")
 
 # --- 4) UN TOOL SAFE GIRA DAVVERO (in isolamento, senza modello) ------------------------
 print("\n=== 4. un tool SAFE gira in isolamento ===")

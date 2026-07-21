@@ -7,7 +7,9 @@ Assistente AI locale in Python, costruito a fasi. Questo file tiene traccia di c
 
 - **Cos'è**: un agente AI locale che conversa in italiano e compie azioni reali sul
   computer tramite *tool*, con un loop agentico (il modello DECIDE, il codice ESEGUE).
-- **Modello**: API Anthropic `claude-sonnet-4-6` (chiave in `ANTHROPIC_API_KEY`).
+- **Modello**: API Anthropic (chiave in `ANTHROPIC_API_KEY`), a LIVELLI (FASE 10):
+  base `claude-haiku-4-5`, normale `claude-sonnet-4-6`, profondo `claude-opus-4-8`
+  con ragionamento adattivo. Il livello cambia a runtime (tool `imposta_livello`).
 - **Vincolo dipendenze**: SOLO `anthropic`, `rich`, `python-dotenv`. Tutto il resto è
   libreria standard. (Unica eccezione prevista: la FASE 6 "Voce", opzionale.)
 - **Fail loud**: niente `except: pass`; un `except` mirato e motivato va bene. Non si
@@ -78,6 +80,29 @@ Un terzo guscio attorno allo stesso Agent (dopo REPL e voce), a ZERO dipendenze 
 - **Test** (`test_server.py`, offline con agente finto): pagina servita, sequenza eventi
   SSE di un turno, doppia versione testo/parlato (markdown a schermo, pulito alla voce),
   conferma approva/nega end-to-end, errori onesti (400/409/404).
+
+### ✅ FASE 10 — Livelli di ragionamento
+Jarvis lavora a TRE livelli, cambiati a runtime dal MODELLO stesso (o dall'utente):
+- **Registro** (`brain.LIVELLI` + `parametri_livello`, funzioni pure): base
+  (`claude-haiku-4-5`, economico), normale (`claude-sonnet-4-6`), profondo
+  (`claude-opus-4-8` + **thinking adattivo** `{type: adaptive}` + effort high e
+  max_tokens maggiorato). Modelli configurabili via `JARVIS_MODEL_*`, partenza via
+  `JARVIS_LIVELLO` (default: base, validata fail loud).
+- **Tool del loop `imposta_livello`** (dichiarato in brain.py, intercettato PRIMA di
+  cancelli/dispatch): quando il livello CAMBIA, il turno **riparte da capo** al nuovo
+  livello (`_RipartiTurno` + rollback al checkpoint + system ricalcolato col livello
+  attivo) — il modello nuovo affronta la richiesta originale con contesto pulito, e non
+  ereditiamo vincoli API su cronologie iniziate senza thinking. Guardia anti-rimbalzo
+  (max 2 ripartenze/turno). Ogni cambio è visibile (`on_note`) e loggato.
+- **web_search per modello** (`tools.server_tools_per_modello`): la variante
+  `_20260209` (filtraggio dinamico) solo sui modelli che la supportano; per Haiku e
+  ignoti la variante base `_20250305` (fail closed).
+- **Riassuntore sempre economico**: la compattazione della cronologia usa il modello
+  del livello base a prescindere dal livello attivo.
+- **Test** (`test_livelli.py`, offline con client finto): registro/parametri, varianti
+  web_search, escalation end-to-end con ripartenza (modello+thinking della 2ª chiamata,
+  cronologia pulita, nota emessa), livello già attivo, livello sconosciuto, guardia
+  anti-rimbalzo con rollback.
 
 ### ✅ FASE 5 — Memoria
 - **5a — memoria LUNGA**: fatti persistenti su SQLite. `memory.py` (infra, singleton
@@ -176,3 +201,7 @@ della fase in corso.
 | `JARVIS_VAD`        | Rilevazione del silenzio nell'ascolto (`0` = finestra fissa) | attiva                           |
 | `JARVIS_VAD_SOGLIA` | Sensibilità del VAD (energia RMS): più alta = meno sensibile | `0.015`                          |
 | `JARVIS_UI_PORT`    | Porta del front end web locale (FASE 9)                  | `8765`                               |
+| `JARVIS_LIVELLO`    | Livello di ragionamento di partenza (FASE 10)            | `base`                               |
+| `JARVIS_MODEL_BASE` | Modello del livello base                                 | `claude-haiku-4-5`                   |
+| `JARVIS_MODEL_NORMALE`| Modello del livello normale                            | `claude-sonnet-4-6`                  |
+| `JARVIS_MODEL_PROFONDO`| Modello del livello profondo (thinking adattivo)      | `claude-opus-4-8`                    |

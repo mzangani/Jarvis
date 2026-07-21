@@ -37,9 +37,103 @@ import safety
 #                passiamo alla create() ma non li dispatchiamo mai localmente.
 # dispatch     = funzione che, dato un nome, esegue il tool giusto.
 # risk_of      = livello di rischio di un tool (SAFE / CAUTION / DANGEROUS).
-from tools import SCHEMAS, SERVER_TOOLS, dispatch, risk_of, precheck
+from tools import SCHEMAS, SERVER_TOOLS, dispatch, risk_of, precheck, server_tools_per_modello
 
-MODEL = "claude-sonnet-4-6"
+# --- LIVELLI DI RAGIONAMENTO (Fase 10) ---------------------------------------------
+# Jarvis lavora a TRE livelli: modelli diversi (costo/capacità) e, al livello più alto,
+# il RAGIONAMENTO ADATTIVO dell'API (thinking: il modello decide quanto "pensare").
+# Il livello si cambia a runtime col tool `imposta_livello`: lo decide il MODELLO
+# stesso (valuta la complessità del compito) o l'utente chiedendolo esplicitamente.
+# I modelli di ciascun livello sono configurabili via env (JARVIS_MODEL_*).
+LIVELLI: dict[str, dict] = {
+    "base": {
+        "modello": os.environ.get("JARVIS_MODEL_BASE", "claude-haiku-4-5"),
+        "max_tokens": 2048,
+        "thinking": False,
+        "descrizione": "veloce ed economico, per l'uso quotidiano",
+    },
+    "normale": {
+        "modello": os.environ.get("JARVIS_MODEL_NORMALE", "claude-sonnet-4-6"),
+        "max_tokens": 4096,
+        "thinking": False,
+        "descrizione": "più capace, per compiti di media complessità",
+    },
+    "profondo": {
+        "modello": os.environ.get("JARVIS_MODEL_PROFONDO", "claude-opus-4-8"),
+        # Con il thinking il "pensiero" consuma output: serve più spazio (16k resta
+        # sotto la soglia oltre cui l'SDK vorrebbe lo streaming).
+        "max_tokens": 16000,
+        "thinking": True,  # ragionamento adattivo + effort alto (vedi parametri_livello)
+        "descrizione": "il più potente e ragiona a fondo, per i compiti difficili",
+    },
+}
+
+# Livello di partenza (env JARVIS_LIVELLO). Validato FAIL LOUD come le altre config.
+LIVELLO_DEFAULT = os.environ.get("JARVIS_LIVELLO", "base").strip().lower()
+if LIVELLO_DEFAULT not in LIVELLI:
+    raise ValueError(
+        f"JARVIS_LIVELLO deve essere uno di {sorted(LIVELLI)}, ricevuto {LIVELLO_DEFAULT!r}."
+    )
+
+
+def parametri_livello(livello: str) -> dict:
+    """
+    I parametri per messages.create() del livello dato (funzione PURA sul registro):
+    modello, max_tokens e — al livello 'profondo' — il ragionamento ADATTIVO
+    (thinking adaptive: è il modello a decidere quanto pensare, non un budget fisso)
+    con effort alto. Niente thinking ai livelli bassi: velocità e costo contenuti.
+    """
+    cfg = LIVELLI[livello]
+    parametri: dict = {"model": cfg["modello"], "max_tokens": cfg["max_tokens"]}
+    if cfg["thinking"]:
+        parametri["thinking"] = {"type": "adaptive"}
+        parametri["output_config"] = {"effort": "high"}
+    return parametri
+
+
+# Il tool con cui il MODELLO cambia livello. È un tool "del loop" (agisce sul loop
+# stesso, non sul mondo): sta qui e viene intercettato in _loop_agentico PRIMA del
+# dispatch normale — non è registrato in tools/ e non passa da conferme (SAFE:
+# l'unico effetto è costo/qualità, ed è sempre visibile via on_note).
+IMPOSTA_LIVELLO = {
+    "name": "imposta_livello",
+    "description": (
+        "Cambia il tuo LIVELLO DI RAGIONAMENTO (modello e profondità di pensiero). "
+        "Livelli: 'base' (veloce ed economico, per l'uso quotidiano), 'normale' (più "
+        "capace, compiti di media complessità), 'profondo' (il più potente, ragiona a "
+        "fondo: analisi complesse, progettazione, codice non banale, problemi a molti "
+        "passi). Usalo QUANDO il compito richiesto supera chiaramente il livello attivo, "
+        "oppure quando l'utente chiede esplicitamente di cambiare livello o di ragionare "
+        "di più/di meno. Dopo la chiamata il turno RICOMINCIA da capo al nuovo livello: "
+        "chiamalo PRIMA di iniziare a svolgere il compito, non a metà. I livelli alti "
+        "costano di più: torna a 'base' quando il lavoro complesso è concluso."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "livello": {
+                "type": "string",
+                "enum": sorted(LIVELLI),
+                "description": "Il livello da attivare: base, normale o profondo.",
+            },
+            "motivo": {
+                "type": "string",
+                "description": "Perché serve questo livello, in breve (mostrato all'utente).",
+            },
+        },
+        "required": ["livello", "motivo"],
+    },
+}
+
+
+class _RipartiTurno(Exception):
+    """
+    Segnale INTERNO di controllo (non un errore): il livello è cambiato a metà turno
+    e il turno va rifatto DA CAPO al nuovo livello. Ripartire da zero — invece di
+    proseguire a metà — è deliberato: il modello nuovo (e l'eventuale thinking)
+    affronta la richiesta originale con un contesto pulito, e non ereditiamo vincoli
+    dell'API su cronologie iniziate senza thinking.
+    """
 
 # --- Robustezza delle chiamate API (Fase 7b) --------------------------------------
 # L'SDK `anthropic` RITENTA GIÀ da solo gli errori TRANSITORI (connessione/timeout,
@@ -147,6 +241,24 @@ dice: proponi allora un'alternativa, non insistere.
 Non fingere mai di aver eseguito un'azione che non puoi eseguire, e non dichiarare
 riuscita un'azione il cui tool ha restituito un errore."""
 
+# Blocco sui LIVELLI DI RAGIONAMENTO (Fase 10), appeso al system prompt a ogni turno
+# con il livello ATTIVO. Le regole d'uso del tool stanno qui (e nella description del
+# tool): valutare la complessità, obbedire all'utente, tornare a base quando si può.
+SYSTEM_LIVELLI = """
+
+LIVELLI DI RAGIONAMENTO. Lavori a livelli, cambiabili col tool 'imposta_livello':
+- "base": veloce ed economico, per l'uso quotidiano (domande, tool semplici, conversazione).
+- "normale": più capace, per compiti di media complessità.
+- "profondo": il più potente e ragiona a fondo, per compiti DIFFICILI (analisi complesse,
+  progettazione, codice non banale, molti passi interdipendenti).
+Livello ATTIVO: {livello}.
+Regole:
+- Se il compito supera chiaramente il livello attivo, chiama imposta_livello PRIMA di
+  svolgerlo: il turno ricomincerà da capo al livello giusto. Non usarlo per compiti che
+  il livello attivo svolge già bene.
+- Se l'utente chiede di cambiare livello o di ragionare di più/di meno, obbedisci.
+- I livelli alti costano di più: concluso il lavoro complesso, torna a "base"."""
+
 # Blocco AGGIUNTIVO per la MODALITÀ VOCE (Fase 6). Le risposte vengono LETTE ad alta voce
 # da un sintetizzatore: il registro "da schermo" (elenchi, grassetti, codice) suona malissimo.
 # Lo appendiamo al system prompt solo quando Jarvis è pilotato a voce (Agent.modalita_voce).
@@ -207,7 +319,10 @@ def descrivi_errore_api(errore: AnthropicError) -> str:
             "Prova a ripartire o ad alleggerire il contesto."
         )
     if isinstance(errore, NotFoundError):  # 404
-        return f"risorsa non trovata (404): forse il nome del modello '{MODEL}' non è più valido."
+        return (
+            "risorsa non trovata (404): forse il nome di uno dei modelli configurati "
+            "non è più valido (vedi JARVIS_MODEL_* in .env)."
+        )
     if isinstance(errore, BadRequestError):  # 400
         return f"richiesta rifiutata dall'API (400, malformata): {errore}"
     # --- TRANSITORI: già ritentati dall'SDK, invano; ha senso solo riprovare più tardi ---
@@ -265,6 +380,9 @@ class Agent:
         # front end diverso (es. il server web) la sostituisce con la propria — stessa
         # firma (nome_tool, tool_input, rischio) -> bool — senza toccare il loop.
         self.conferma = safety.confirm
+        # LIVELLO DI RAGIONAMENTO attivo (Fase 10): parte dal default (env JARVIS_LIVELLO,
+        # validato all'import) e cambia a runtime via il tool imposta_livello.
+        self.livello = LIVELLO_DEFAULT
         # Quanti token di INPUT ha usato l'ultima chiamata all'API in questo turno.
         # È il segnale (gratis, incluso in ogni risposta) per decidere se compattare
         # la cronologia a fine turno. 0 = nessuna chiamata ancora.
@@ -305,6 +423,11 @@ class Agent:
                     + righe
                 )
 
+        # Livelli di ragionamento (Fase 10): il modello deve sapere a che livello sta
+        # lavorando ORA per decidere se cambiarlo. Ricostruito a ogni turno (e a ogni
+        # ripartenza di turno), così riflette sempre il livello attivo.
+        prompt += SYSTEM_LIVELLI.format(livello=self.livello)
+
         # In modalità voce, aggiungiamo le istruzioni di registro "parlato" (SYSTEM_VOCE):
         # risposte brevi e senza formattazione, adatte a essere lette a voce.
         if self.modalita_voce:
@@ -321,7 +444,9 @@ class Agent:
         """
         resoconto = history.serializza_per_riassunto(vecchi)
         risposta = self.client.messages.create(
-            model=MODEL,
+            # Riassumere è un compito semplice: usiamo SEMPRE il modello del livello
+            # "base" (economico), a prescindere dal livello attivo della conversazione.
+            model=LIVELLI["base"]["modello"],
             max_tokens=1024,
             system=SYSTEM_RIASSUNTO,
             messages=[{"role": "user", "content": "Riassumi questa conversazione:\n\n" + resoconto}],
@@ -399,13 +524,29 @@ class Agent:
         checkpoint = len(self.messages)
         self.messages.append({"role": "user", "content": user_input})
 
-        # System prompt DINAMICO: base + fatti ricordati. Lo calcoliamo una volta per
-        # turno (non serve rifarlo a ogni giro del loop interno: nello stesso turno un
-        # 'ricorda' è già visibile al modello via il suo tool_result).
-        system = self._costruisci_system()
-
         try:
-            risposta_finale = self._loop_agentico(system, on_tool, on_note)
+            # RIPARTENZA DI TURNO (Fase 10): se a metà turno il modello cambia livello
+            # (tool imposta_livello -> _RipartiTurno), scartiamo il turno parziale e lo
+            # rifacciamo DA CAPO al nuovo livello — stesso input utente, cronologia
+            # pulita, system prompt ricalcolato (mostra il livello attivo). Guardia
+            # anti-rimbalzo: al massimo 2 ripartenze per turno, poi fail loud.
+            ripartenze = 0
+            while True:
+                # System prompt DINAMICO: base + fatti ricordati + livello attivo. Lo
+                # ricalcoliamo a ogni (ri)partenza del turno, non a ogni giro del loop.
+                system = self._costruisci_system()
+                try:
+                    risposta_finale = self._loop_agentico(system, on_tool, on_note)
+                    break
+                except _RipartiTurno:
+                    ripartenze += 1
+                    if ripartenze > 2:
+                        raise RuntimeError(
+                            "il modello ha continuato a cambiare livello nello stesso "
+                            "turno; interrompo per sicurezza."
+                        ) from None
+                    del self.messages[checkpoint:]
+                    self.messages.append({"role": "user", "content": user_input})
         except AnthropicError as e:
             # GRACEFUL DEGRADATION: l'API ha fallito anche dopo i retry dell'SDK (o è un
             # errore permanente). Non propaghiamo (ucciderebbe la REPL): ripuliamo il
@@ -451,15 +592,19 @@ class Agent:
             # limit, overload, chiave errata...). L'SDK ha GIÀ ritentato da solo i guasti
             # transitori (vedi _API_RETRIES); se solleva comunque, l'eccezione risale a
             # chat() che la traduce in un messaggio leggibile senza crashare.
+            # Parametri del LIVELLO attivo (Fase 10): modello, max_tokens e (al livello
+            # profondo) il ragionamento adattivo. Ricalcolati a ogni giro: costano nulla
+            # e sono sempre coerenti con self.livello.
+            parametri = parametri_livello(self.livello)
             response = self.client.messages.create(
-                model=MODEL,
-                max_tokens=2048,
-                system=system,  # dinamico: base + fatti ricordati (vedi _costruisci_system)
+                system=system,  # dinamico: base + fatti + livello (vedi _costruisci_system)
                 messages=self.messages,
-                # SCHEMAS = i nostri tool (li eseguiamo noi). SERVER_TOOLS = i tool
-                # nativi eseguiti da Anthropic (es. web_search): li dichiariamo qui,
-                # ma non li dispatchiamo mai localmente.
-                tools=SCHEMAS + SERVER_TOOLS,
+                # SCHEMAS = i nostri tool (li eseguiamo noi). IMPOSTA_LIVELLO = il tool
+                # del loop per cambiare livello (intercettato più sotto, mai dispatchato).
+                # server_tools_per_modello = i tool nativi eseguiti da Anthropic (es.
+                # web_search), nella VARIANTE giusta per il modello attivo.
+                tools=SCHEMAS + [IMPOSTA_LIVELLO] + server_tools_per_modello(parametri["model"]),
+                **parametri,  # model, max_tokens e (se profondo) thinking + effort
             )
 
             # Quanti token di input ha pesato QUESTA chiamata (system + tool + cronologia).
@@ -537,6 +682,40 @@ class Agent:
 
                 if on_tool is not None:
                     on_tool(block.name, block.input)
+
+                # IMPOSTA_LIVELLO (Fase 10): tool DEL LOOP, intercettato PRIMA dei
+                # cancelli e del dispatch (non è registrato in tools/: risk_of lo
+                # tratterebbe come sconosciuto). Se il livello CAMBIA davvero, il turno
+                # riparte da capo al nuovo livello (vedi _RipartiTurno e chat()).
+                if block.name == "imposta_livello":
+                    ingresso = block.input or {}
+                    nuovo = (ingresso.get("livello") or "").strip().lower()
+                    motivo = (ingresso.get("motivo") or "").strip()
+                    if nuovo not in LIVELLI:
+                        tool_results.append({
+                            "type": "tool_result", "tool_use_id": block.id,
+                            "content": f"Livello sconosciuto: {nuovo!r}. Validi: {sorted(LIVELLI)}.",
+                            "is_error": True,
+                        })
+                        continue
+                    if nuovo == self.livello:
+                        tool_results.append({
+                            "type": "tool_result", "tool_use_id": block.id,
+                            "content": f"Il livello '{nuovo}' è già attivo.",
+                            "is_error": False,
+                        })
+                        continue
+                    self.livello = nuovo
+                    # Trasparenza: il cambio è SEMPRE visibile (nota) e tracciato (log).
+                    if on_note is not None:
+                        on_note(f"livello di ragionamento → {nuovo}"
+                                + (f" ({motivo})" if motivo else ""))
+                    logger.log_tool_call(
+                        tool="imposta_livello", tool_input=ingresso,
+                        output=f"livello attivo: {nuovo}", esito="ok",
+                        is_error=False, durata_ms=0.0, rischio=safety.SAFE,
+                    )
+                    raise _RipartiTurno()
 
                 # Rischio del tool: ci serve sia per il cancello di conferma sia per
                 # tracciarlo nel log a OGNI esito (anche i rifiuti). Lo calcoliamo qui

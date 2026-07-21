@@ -2,7 +2,9 @@
 
 Assistente AI **locale** in Python: conversa in italiano e compie azioni **reali** sul
 tuo computer tramite *strumenti* (tool), con un **loop agentico** — il modello DECIDE,
-il codice ESEGUE. Usa l'API Anthropic (`claude-sonnet-4-6`).
+il codice ESEGUE. Usa l'API Anthropic con **livelli di ragionamento** adattivi: parte
+economico (`claude-haiku-4-5`) e sale ai modelli più potenti quando il compito lo
+richiede (vedi [Livelli di ragionamento](#livelli-di-ragionamento-fase-10)).
 
 > Progetto costruito a fasi, con un occhio didattico. Lo stato di ciascuna fase è in
 > [`PIANO.md`](PIANO.md).
@@ -177,6 +179,10 @@ Le chiamate all'API sono resistenti ai guasti:
 | `JARVIS_VAD` | Rilevazione del silenzio nell'ascolto (`0` = finestra fissa) | attiva |
 | `JARVIS_VAD_SOGLIA` | Sensibilità del VAD (energia RMS): più alta = meno sensibile | `0.015` |
 | `JARVIS_UI_PORT` | Porta del front end web locale (Fase 9) | `8765` |
+| `JARVIS_LIVELLO` | Livello di ragionamento di partenza (`base`/`normale`/`profondo`) | `base` |
+| `JARVIS_MODEL_BASE` | Modello del livello base | `claude-haiku-4-5` |
+| `JARVIS_MODEL_NORMALE` | Modello del livello normale | `claude-sonnet-4-6` |
+| `JARVIS_MODEL_PROFONDO` | Modello del livello profondo | `claude-opus-4-8` |
 
 Tutte le opzionali sono documentate anche in [`.env.example`](.env.example).
 
@@ -282,6 +288,30 @@ installata una "Enhanced"/"Premium", che suona molto più naturale).
 > end-to-end con `say`. Con piper i backend audio vanno **collaudati in locale** (servono
 > microfono/altoparlanti e il binario piper). Limite residuo: la conferma delle azioni
 > CAUTION/DANGEROUS passa ancora dalla **tastiera** anche in modalità voce.
+
+## Livelli di ragionamento (Fase 10)
+
+Jarvis non usa sempre lo stesso "cervello": lavora a **tre livelli**, e li cambia **da
+solo** valutando la complessità del compito — o quando glielo chiedi tu.
+
+| Livello | Modello (default) | Ragionamento | Quando |
+|---|---|---|---|
+| `base` *(partenza)* | `claude-haiku-4-5` | — | uso quotidiano: domande, tool semplici |
+| `normale` | `claude-sonnet-4-6` | — | compiti di media complessità |
+| `profondo` | `claude-opus-4-8` | **adattivo** (il modello decide quanto pensare) + effort alto | analisi complesse, progettazione, codice non banale |
+
+Come funziona:
+- Il cambio è un **tool** (`imposta_livello`) che il modello chiama quando serve; quando
+  lo fa, **il turno ricomincia da capo al nuovo livello** — così la tua richiesta viene
+  affrontata per intero dal cervello giusto, non a metà. Una guardia impedisce cambi di
+  livello a raffica.
+- **Comandi espliciti**: "ragiona di più", "usa il livello profondo", "torna al livello
+  base", "non serve pensare tanto" — Jarvis obbedisce.
+- **Trasparenza**: ogni cambio è mostrato (🧠 `livello di ragionamento → profondo (motivo)`)
+  e tracciato nel log JSONL. I livelli alti costano di più: Jarvis è istruito a tornare
+  a `base` quando il lavoro complesso è concluso.
+- I modelli di ogni livello si cambiano con `JARVIS_MODEL_BASE/NORMALE/PROFONDO`; il
+  livello di partenza con `JARVIS_LIVELLO`.
 
 ## Front end web (Fase 9) — l'HUD stile Iron Man
 

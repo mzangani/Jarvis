@@ -12,6 +12,10 @@ in due oggetti comodi per brain.py:
 
 from . import files, system, shell, web, memory, appunti, utilita, files_extra
 
+# Fase 10 (livelli): la variante del web search dipende dal MODELLO in uso.
+# Riesportiamo la funzione così brain.py la prende da `tools` come tutto il resto.
+from .web import server_tools_per_modello  # noqa: F401
+
 # Elenco dei moduli-famiglia. Ogni famiglia espone TOOLS (e opzionalmente PRECHECKS).
 _MODULI = [system, files, shell, web, memory, appunti, utilita, files_extra]
 
