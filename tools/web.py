@@ -44,10 +44,11 @@ Due capacità Web, complementari:
 import re
 import urllib.error
 import urllib.request
+import webbrowser
 from html.parser import HTMLParser
 
 import safety
-from safety import CAUTION
+from safety import CAUTION, SAFE
 
 # Tempo massimo per la richiesta (come la shell: un fetch che si impianta non deve
 # bloccare l'agente per sempre). Vale sulle operazioni della socket.
@@ -272,10 +273,54 @@ LEGGI_PAGINA = {
 }
 
 
-# Terna (schema, funzione, rischio). Web è CAUTION: la conferma è del loop in
-# brain.py, non di questo file.
+# --- apri_url: mostra una fonte nel browser dell'utente ----------------------
+def apri_url(url: str) -> str:
+    """
+    Apre `url` nel BROWSER predefinito dell'utente (nuova scheda).
+
+    È il tool delle FONTI: dopo una risposta basata sul web, Jarvis chiede all'utente
+    se vuole vedere la pagina e, al suo sì, la apre. Il consenso è quindi già stato
+    dato IN CONVERSAZIONE (il system prompt impone di chiedere prima): per questo il
+    rischio è SAFE — niente secondo cancello di conferma, che in una conversazione a
+    voce sarebbe solo attrito. Il guardiano anti-SSRF vale comunque (prima riga +
+    precheck): mai indirizzi locali o schemi strani, solo web vero.
+    """
+    url = safety.ensure_url_sicuro(url)  # stesso cancello di leggi_pagina
+    if not webbrowser.open(url):
+        # Ambiente senza browser (headless): fail loud, non fingere di aver aperto.
+        raise RuntimeError("Non sono riuscito ad aprire un browser su questa macchina.")
+    return f"Ho aperto nel browser: {url}"
+
+
+APRI_URL = {
+    "name": "apri_url",
+    "description": (
+        "Apre una pagina web nel BROWSER dell'utente (nuova scheda). Usalo per mostrare "
+        "una FONTE dopo che l'utente ha ESPLICITAMENTE accettato: prima chiedi (es. "
+        "'vuoi che apra la fonte?'), e solo se dice sì chiamalo con l'URL. Non aprirlo "
+        "mai di tua iniziativa senza il sì dell'utente nello scambio corrente. NON serve "
+        "per leggere il contenuto di una pagina (usa leggi_pagina). Solo http/https; "
+        "gli indirizzi locali/di rete privata sono bloccati, ed è normale."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "url": {
+                "type": "string",
+                "description": "L'URL completo della pagina da aprire, es. 'https://esempio.it/articolo'.",
+            }
+        },
+        "required": ["url"],
+    },
+}
+
+
+# Terne (schema, funzione, rischio). leggi_pagina è CAUTION (la conferma è del loop
+# in brain.py); apri_url è SAFE perché il consenso è già dato in conversazione (vedi
+# il suo docstring) e resta protetto dal guardiano anti-SSRF.
 TOOLS = [
     (LEGGI_PAGINA, leggi_pagina, CAUTION),
+    (APRI_URL, apri_url, SAFE),
 ]
 
 
@@ -322,4 +367,5 @@ def _precheck_leggi_pagina(tool_input: dict) -> None:
 
 PRECHECKS = {
     "leggi_pagina": _precheck_leggi_pagina,
+    "apri_url": _precheck_leggi_pagina,  # stesso guardiano: solo web vero, mai host locali
 }

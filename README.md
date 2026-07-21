@@ -107,6 +107,7 @@ Ogni tool ha un **livello di rischio**: `SAFE` (esegue subito), `CAUTION`/`DANGE
 | | `scrivi_file`, `sposta`, `crea_cartella`, `comprimi_zip`, `estrai_zip` | CAUTION |
 | **Shell** | `esegui_comando` | DANGEROUS |
 | **Web** | `leggi_pagina` | CAUTION |
+| | `apri_url` (apre una fonte nel tuo browser, solo dopo il tuo sì) | SAFE |
 | | `web_search` (eseguito dai server Anthropic) | — |
 | **Memoria** | `ricorda`, `richiama` | SAFE |
 | **Appunti** | `leggi_clipboard`, `scrivi_clipboard`, `aggiungi_nota`, `elenca_note` | SAFE |
@@ -298,9 +299,14 @@ python main.py --ui        # oppure:  python server.py
   nella pagina compare un pannello di **autorizzazione** (Approva/Nega) con il tool e gli
   argomenti esatti. Se non rispondi entro 2 minuti, l'azione è **rifiutata** (mai
   silenzio-assenso).
-- **Voce dal browser** (facoltativa): 🎙 riconoscimento vocale, 🔊 sintesi delle risposte,
-  ∞ **conversazione continua** (dopo la risposta torna in ascolto da solo) — Web Speech
-  API (Chrome, Safari, Edge), senza le dipendenze audio Python.
+- **Modalità vocale continua**: il 🎙 è un interruttore di *conversazione*, non un
+  "registra una volta" — acceso, il ciclo è automatico: parli → Jarvis risponde **a
+  voce** → torna in ascolto da solo, finché non lo spegni. (Il 🔊 serve solo a farsi
+  leggere le risposte quando scrivi da tastiera.) Web Speech API (Chrome, Safari,
+  Edge), senza le dipendenze audio Python.
+- **Fonti su richiesta**: quando risponde basandosi sul web, Jarvis cita la fonte e ti
+  **chiede** se vuoi vederla; se dici sì, la **apre nel browser** (`apri_url`, protetto
+  dallo stesso guardiano anti-SSRF di `leggi_pagina`).
 - **Voce UMANA, non robotica**: nell'HUD il modello risponde in **registro parlato**
   (breve, discorsivo, senza formattazione) e alla sintesi arriva una versione **ripulita**
   (mai letti asterischi, simboli, emoji o URL). Il menu a tendina elenca le voci italiane

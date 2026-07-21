@@ -138,6 +138,43 @@ check("_scegli con nomi inesistenti -> None",
 
 
 # ============================================================================
+# 7) apri_url — guardiano SSRF attivo; apertura verificata con un browser finto
+# ============================================================================
+print("\n=== 7. apri_url (fonti nel browser) ===")
+from tools import web as tool_web
+
+# Un URL locale è RIFIUTATO dal guardiano prima ancora di toccare il browser
+# (127.0.0.1 non richiede DNS: il controllo gira anche offline).
+try:
+    tool_web.apri_url("http://127.0.0.1:8080/segreta")
+    check("apri_url blocca gli host locali (SSRF)", False, "non ha sollevato")
+except PermissionError:
+    check("apri_url blocca gli host locali (SSRF)", True)
+
+# Percorso felice: neutralizziamo il guardiano (niente DNS nel test) e sostituiamo
+# webbrowser con un finto che registra. Ripristiniamo SEMPRE (finally).
+_guardiano = safety.ensure_url_sicuro
+_apri = tool_web.webbrowser.open
+aperti = []
+safety.ensure_url_sicuro = lambda u: u
+tool_web.webbrowser.open = lambda u: (aperti.append(u), True)[1]
+try:
+    esito = tool_web.apri_url("https://esempio.it/articolo")
+    check("apri_url apre l'URL richiesto", aperti == ["https://esempio.it/articolo"], f"-> {aperti}")
+    check("apri_url riferisce cosa ha fatto", "aperto" in esito.lower(), f"-> {esito!r}")
+    # Senza browser (open -> False) deve fallire LOUD, non fingere.
+    tool_web.webbrowser.open = lambda u: False
+    try:
+        tool_web.apri_url("https://esempio.it/x")
+        check("senza browser fallisce loud", False, "non ha sollevato")
+    except RuntimeError:
+        check("senza browser fallisce loud", True)
+finally:
+    safety.ensure_url_sicuro = _guardiano
+    tool_web.webbrowser.open = _apri
+
+
+# ============================================================================
 print("\n" + "=" * 60)
 if FALLITI:
     print(f"RISULTATO: {len(FALLITI)} test FALLITI: {FALLITI}")

@@ -57,7 +57,7 @@ ATTESI = {
     "get_system_info", "elenca_processi", "apri_applicazione", "screenshot", "chiudi_processo",
     "leggi_file", "lista_dir", "cerca_per_nome", "cerca_nel_contenuto",
     "scrivi_file", "sposta", "crea_cartella",
-    "esegui_comando", "leggi_pagina", "ricorda", "richiama",
+    "esegui_comando", "leggi_pagina", "apri_url", "ricorda", "richiama",
     # Nuove famiglie: appunti (clipboard + note), utilità (data/ora + meteo), file avanzati.
     "leggi_clipboard", "scrivi_clipboard", "aggiungi_nota", "elenca_note",
     "data_ora", "meteo",

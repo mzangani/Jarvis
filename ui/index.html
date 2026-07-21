@@ -111,6 +111,11 @@
   .tondo:active { transform: scale(.94); }
   .tondo.attivo { color: var(--ambra); border-color: rgba(255,179,71,.6);
                   box-shadow: 0 0 18px rgba(255,179,71,.45); }
+  /* mentre il microfono è DAVVERO in ascolto, pulsa */
+  .tondo.ascolto { animation: pulsa-mic 1.2s ease-in-out infinite; }
+  @keyframes pulsa-mic {
+    50% { box-shadow: 0 0 26px rgba(255,179,71,.75); transform: scale(1.06); }
+  }
   .tondo[disabled] { opacity: .25; cursor: not-allowed; }
 
   #sel-voce {
@@ -216,9 +221,8 @@
     </div>
     <div id="sotto-reattore">Arc Reactor<br>online</div>
     <div id="controlli-voce">
-      <button id="btn-mic" class="tondo" title="Parla (riconoscimento vocale del browser)">🎙</button>
-      <button id="btn-tts" class="tondo" title="Attiva/disattiva la voce di Jarvis">🔊</button>
-      <button id="btn-auto" class="tondo" title="Conversazione continua: dopo la risposta torno in ascolto">∞</button>
+      <button id="btn-mic" class="tondo" title="Modalità vocale continua: parla, ti risponde, ti riascolta. Premi di nuovo per uscire.">🎙</button>
+      <button id="btn-tts" class="tondo" title="Leggi le risposte a voce anche quando scrivo da tastiera">🔊</button>
     </div>
     <select id="sel-voce" title="La voce di Jarvis (le migliori in alto)"></select>
   </section>
@@ -270,11 +274,9 @@ function setStato(valore) {
 }
 
 /* ---------- sintesi vocale: la voce più UMANA disponibile ---------- */
-const selVoce = $("sel-voce"), btnAuto = $("btn-auto");
+const selVoce = $("sel-voce");
 let ttsAttivo = localStorage.getItem("jarvis_tts") === "1";
-let autoAttivo = localStorage.getItem("jarvis_auto") === "1";
 btnTts.classList.toggle("attivo", ttsAttivo);
-btnAuto.classList.toggle("attivo", autoAttivo);
 
 /* Tono calmo, da maggiordomo: appena sotto il pitch neutro, ritmo naturale. */
 const RATE = 1.03, PITCH = 0.92;
@@ -320,7 +322,7 @@ if ("speechSynthesis" in window) {
 selVoce.onchange = () => {
   voceScelta = speechSynthesis.getVoices().find(v => v.name === selVoce.value) || null;
   localStorage.setItem("jarvis_voce", selVoce.value);
-  if (ttsAttivo) parla("Questa è la mia voce, signore.");
+  parla("Questa è la mia voce, signore.", null, true);
 };
 
 btnTts.onclick = () => {
@@ -328,12 +330,7 @@ btnTts.onclick = () => {
   btnTts.classList.toggle("attivo", ttsAttivo);
   localStorage.setItem("jarvis_tts", ttsAttivo ? "1" : "0");
   if (!ttsAttivo) { speechSynthesis.cancel(); document.body.classList.remove("parlo"); }
-  else parla("Sintesi vocale attiva, signore.");
-};
-btnAuto.onclick = () => {
-  autoAttivo = !autoAttivo;
-  btnAuto.classList.toggle("attivo", autoAttivo);
-  localStorage.setItem("jarvis_auto", autoAttivo ? "1" : "0");
+  else parla("Sintesi vocale attiva, signore.", null, true);
 };
 
 /* Il testo va spezzato in FRASI: le utterance brevi suonano più naturali (pause
@@ -354,10 +351,12 @@ function inFrasi(testo) {
   return frasi;
 }
 
-/* parla(testo, poi): sintetizza frase per frase; `poi` (opzionale) è chiamata alla
-   FINE del parlato — è il gancio della conversazione continua. */
-function parla(testo, poi) {
-  if (!ttsAttivo || !("speechSynthesis" in window) || !testo) { if (poi) poi(); return; }
+/* parla(testo, poi, forza): sintetizza frase per frase; `poi` (opzionale) è chiamata
+   alla FINE del parlato — è il gancio del ciclo continuo. In MODALITÀ VOCALE si parla
+   SEMPRE (forza=true), a prescindere dall'interruttore 🔊 (che vale per la tastiera). */
+function parla(testo, poi, forza) {
+  const parlare = (ttsAttivo || forza) && ("speechSynthesis" in window) && testo;
+  if (!parlare) { if (poi) poi(); return; }
   speechSynthesis.cancel();
   const frasi = inFrasi(testo);
   if (!frasi.length) { if (poi) poi(); return; }
@@ -376,26 +375,69 @@ function parla(testo, poi) {
   });
 }
 
-/* ---------- riconoscimento vocale (facoltativo, dal browser) ---------- */
+/* ---------- MODALITÀ VOCALE CONTINUA ----------
+   Il 🎙 non è "registra una volta": è un INTERRUTTORE di conversazione. Acceso:
+   ascolta → invia → Jarvis risponde A VOCE (sempre, in questa modalità) → torna in
+   ascolto da solo. Spento: tutto si ferma. Il ciclo non ascolta MENTRE Jarvis parla
+   (si sentirebbe da solo) e riparte a fine risposta o dopo un silenzio. */
 const Ricon = window.SpeechRecognition || window.webkitSpeechRecognition;
 let ric = null;
+let modoVocale = false;   // l'interruttore
+let elaborando = false;   // true tra l'invio e la fine del turno (dal server)
+let riavvioTimer = null;
+
+function avviaAscolto() {
+  if (!modoVocale || !ric || elaborando || document.body.classList.contains("parlo")) return;
+  try { ric.start(); } catch (e) { /* già avviato: va bene */ }
+}
+function programmaRiavvio(ms) {
+  clearTimeout(riavvioTimer);
+  riavvioTimer = setTimeout(avviaAscolto, ms || 350);
+}
+
 if (Ricon) {
   ric = new Ricon();
   ric.lang = "it-IT"; ric.interimResults = false; ric.maxAlternatives = 1;
+  ric.onstart = () => btnMic.classList.add("ascolto");
   ric.onresult = ev => {
     const testo = ev.results[0][0].transcript.trim();
     if (testo) { ingresso.value = testo; inviaTesto(); }
   };
-  ric.onend = () => btnMic.classList.remove("attivo");
-  ric.onerror = () => btnMic.classList.remove("attivo");
-  btnMic.onclick = () => {
-    if (btnMic.classList.contains("attivo")) { ric.stop(); return; }
-    btnMic.classList.add("attivo");
-    ric.start();
+  ric.onerror = ev => {
+    if (ev.error === "not-allowed" || ev.error === "service-not-allowed") {
+      // Permesso negato: la modalità vocale non può funzionare. Spegniamo e diciamolo.
+      spegniModoVocale();
+      riga("errore", "Errore", "Microfono non consentito dal browser: controlla i permessi del sito.");
+    }
+    /* gli altri errori (no-speech, aborted...) sono normali: ci pensa onend */
   };
+  ric.onend = () => {
+    btnMic.classList.remove("ascolto");
+    // Silenzio o pausa: se la modalità è attiva e non stiamo elaborando/parlando,
+    // torniamo SEMPRE in ascolto. È questo che rende la conversazione continua.
+    if (modoVocale) programmaRiavvio();
+  };
+  btnMic.onclick = () => (modoVocale ? spegniModoVocale() : accendiModoVocale());
 } else {
   btnMic.disabled = true;
   btnMic.title = "Riconoscimento vocale non supportato da questo browser";
+}
+
+function accendiModoVocale() {
+  modoVocale = true;
+  btnMic.classList.add("attivo");
+  riga("sistema", "Sistema", "Modalità vocale attiva: parla pure. Premi di nuovo 🎙 per uscire.");
+  // Parlare QUI (gesto dell'utente) sblocca anche la sintesi nei browser più severi.
+  parla("Ti ascolto, signore.", () => programmaRiavvio(150), true);
+}
+function spegniModoVocale() {
+  modoVocale = false;
+  clearTimeout(riavvioTimer);
+  btnMic.classList.remove("attivo", "ascolto");
+  try { ric && ric.stop(); } catch (e) {}
+  speechSynthesis.cancel();
+  document.body.classList.remove("parlo");
+  riga("sistema", "Sistema", "Modalità vocale disattivata.");
 }
 
 /* ---------- invio ---------- */
@@ -421,7 +463,10 @@ function mostraConferma(ev) {
     Object.entries(ev.input || {}).map(([k, v]) => `${k}: ${String(v)}`).join("\n");
   conferma.classList.toggle("dangerous", ev.rischio === "DANGEROUS");
   conferma.classList.add("visibile");
-  parla("Richiesta di autorizzazione, signore.");
+  // Mentre il pannello aspetta il click, l'ascolto va in pausa (niente invii accidentali).
+  clearTimeout(riavvioTimer);
+  try { ric && ric.stop(); } catch (e) {}
+  parla("Richiesta di autorizzazione, signore.", null, modoVocale);
 }
 async function rispondi(ok) {
   conferma.classList.remove("visibile");
@@ -440,21 +485,22 @@ const sse = new EventSource("/api/eventi");
 sse.onmessage = msg => {
   const ev = JSON.parse(msg.data);
   switch (ev.tipo) {
-    case "stato":     setStato(ev.valore); break;
+    case "stato":
+      elaborando = ev.valore === "elaboro";
+      setStato(ev.valore);
+      break;
     case "tool":      riga("sistema", "Sistema", `» uso ${ev.tool}(${JSON.stringify(ev.input)})`); break;
     case "nota":      riga("sistema", "Sistema", ev.testo); break;
     case "risposta":
       riga("jarvis", "J.A.R.V.I.S.", ev.testo);
-      /* Alla voce va la versione RIPULITA dal server (niente simboli/markdown);
-         a fine parlato, se la conversazione continua è attiva, riapriamo il microfono. */
-      parla(ev.parlato || ev.testo, () => {
-        if (autoAttivo && ric) {
-          btnMic.classList.add("attivo");
-          try { ric.start(); } catch (e) { /* già in ascolto: va bene così */ }
-        }
-      });
+      /* Alla voce va la versione RIPULITA dal server (niente simboli/markdown). In
+         modalità vocale si parla SEMPRE, e a fine parlato si torna in ascolto. */
+      parla(ev.parlato || ev.testo, () => { if (modoVocale) programmaRiavvio(200); }, modoVocale);
       break;
-    case "errore":    riga("errore", "Errore", ev.testo); break;
+    case "errore":
+      riga("errore", "Errore", ev.testo);
+      if (modoVocale) programmaRiavvio(600);
+      break;
     case "conferma_richiesta": mostraConferma(ev); break;
   }
 };

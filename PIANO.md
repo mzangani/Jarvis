@@ -66,8 +66,15 @@ Un terzo guscio attorno allo stesso Agent (dopo REPL e voce), a ZERO dipendenze 
   `parlato` ripulito con `voice.pulisci_per_voce` per la sintesi (mai letti simboli).
   Lato browser: voci italiane ordinate per qualità (Premium/Enhanced/Google/Siri) con
   menu di scelta persistente, frasi spezzate per naturalezza (niente troncamenti),
-  pitch/rate calibrati, e modalità ∞ conversazione continua (riapre il microfono a fine
-  risposta).
+  pitch/rate calibrati.
+- **Modalità vocale SEMPRE continua**: il 🎙 è un interruttore di conversazione — acceso:
+  ascolta → invia → risponde a voce (sempre, in questa modalità) → riascolta da solo;
+  non ascolta MENTRE parla (eviterebbe di sentirsi); permesso microfono negato → si
+  spegne con messaggio chiaro. Il 🔊 resta per farsi leggere le risposte da tastiera.
+- **Fonti su richiesta** (`apri_url`, in `tools/web.py`): il system prompt impone di
+  citare la fonte per nome e CHIEDERE prima di aprirla; al sì dell'utente, apri_url la
+  apre nel browser (webbrowser.open). SAFE (consenso già dato in conversazione) ma con
+  lo stesso guardiano anti-SSRF di leggi_pagina (prima riga + precheck).
 - **Test** (`test_server.py`, offline con agente finto): pagina servita, sequenza eventi
   SSE di un turno, doppia versione testo/parlato (markdown a schermo, pulito alla voce),
   conferma approva/nega end-to-end, errori onesti (400/409/404).
