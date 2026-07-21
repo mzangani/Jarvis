@@ -42,6 +42,8 @@ class FintoAgent:
         if "conferma" in testo:
             ok = self.conferma("scrivi_file", {"percorso": "x.txt"}, "CAUTION")
             return "autorizzato" if ok else "negato"
+        if "markdown" in testo:
+            return "ecco **grassetto** e `codice` 🎉"
         return f"eco: {testo}"
 
 
@@ -105,9 +107,21 @@ check("primo evento: stato elaboro", ev1 == {"tipo": "stato", "valore": "elaboro
 ev2 = sse.prossimo()
 check("secondo evento: tool", ev2["tipo"] == "tool" and ev2["tool"] == "tool_di_prova", f"-> {ev2}")
 ev3 = sse.prossimo()
-check("terzo evento: risposta", ev3 == {"tipo": "risposta", "testo": "eco: ciao"}, f"-> {ev3}")
+check("terzo evento: risposta", ev3["tipo"] == "risposta" and ev3["testo"] == "eco: ciao", f"-> {ev3}")
+check("la risposta porta anche la versione per la voce", ev3.get("parlato") == "eco: ciao", f"-> {ev3}")
 ev4 = sse.prossimo()
 check("quarto evento: stato pronto", ev4 == {"tipo": "stato", "valore": "pronto"}, f"-> {ev4}")
+
+# La versione 'parlato' è RIPULITA: markdown/emoji non arrivano alla sintesi del browser.
+post("/api/chat", {"testo": "prova markdown"})
+sse.prossimo(); sse.prossimo()           # stato elaboro, tool
+ev = sse.prossimo()
+check("a schermo il testo resta com'è", "**grassetto**" in ev["testo"], f"-> {ev['testo']!r}")
+check("alla voce arriva testo pulito", ev["parlato"] == "ecco grassetto e codice", f"-> {ev['parlato']!r}")
+sse.prossimo()                            # stato pronto
+
+# Il registro conversazionale è attivo per l'HUD (risposte brevi, da ascoltare).
+check("modalita_voce attiva nell'agente del server", stato.agent.modalita_voce is True)
 
 # ============================================================================
 # 3) Conferma via browser: APPROVA e NEGA
@@ -123,8 +137,8 @@ check("arriva conferma_richiesta", ev["tipo"] == "conferma_richiesta" and ev["ri
 codice, _ = post("/api/conferma", {"ok": True})
 check("POST /api/conferma -> 200", codice == 200)
 ev = sse.prossimo()
-check("con APPROVA la risposta è 'autorizzato'", ev == {"tipo": "risposta", "testo": "autorizzato"},
-      f"-> {ev}")
+check("con APPROVA la risposta è 'autorizzato'",
+      ev["tipo"] == "risposta" and ev["testo"] == "autorizzato", f"-> {ev}")
 sse.prossimo()  # stato pronto
 
 codice, _ = post("/api/chat", {"testo": "chiedi conferma di nuovo"})
@@ -132,7 +146,8 @@ sse.prossimo(); sse.prossimo()          # stato elaboro, tool
 ev = sse.prossimo()                      # conferma_richiesta
 post("/api/conferma", {"ok": False})
 ev = sse.prossimo()
-check("con NEGA la risposta è 'negato'", ev == {"tipo": "risposta", "testo": "negato"}, f"-> {ev}")
+check("con NEGA la risposta è 'negato'",
+      ev["tipo"] == "risposta" and ev["testo"] == "negato", f"-> {ev}")
 sse.prossimo()  # stato pronto
 
 # ============================================================================

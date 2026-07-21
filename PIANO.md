@@ -61,8 +61,16 @@ Un terzo guscio attorno allo stesso Agent (dopo REPL e voce), a ZERO dipendenze 
 - **`ui/index.html`**: pagina singola senza risorse esterne — arc reactor animato (CSS),
   tema scuro/ciano, log comandi/sistema, pannello di autorizzazione, e voce dal BROWSER
   facoltativa (Web Speech API: 🎙 riconoscimento, 🔊 sintesi) senza dipendenze Python.
+- **Voce UMANA nell'HUD**: l'agente del server ha `modalita_voce=True` (registro parlato,
+  risposte brevi) e l'evento `risposta` porta DUE versioni — `testo` per lo schermo e
+  `parlato` ripulito con `voice.pulisci_per_voce` per la sintesi (mai letti simboli).
+  Lato browser: voci italiane ordinate per qualità (Premium/Enhanced/Google/Siri) con
+  menu di scelta persistente, frasi spezzate per naturalezza (niente troncamenti),
+  pitch/rate calibrati, e modalità ∞ conversazione continua (riapre il microfono a fine
+  risposta).
 - **Test** (`test_server.py`, offline con agente finto): pagina servita, sequenza eventi
-  SSE di un turno, conferma approva/nega end-to-end, errori onesti (400/409/404).
+  SSE di un turno, doppia versione testo/parlato (markdown a schermo, pulito alla voce),
+  conferma approva/nega end-to-end, errori onesti (400/409/404).
 
 ### ✅ FASE 5 — Memoria
 - **5a — memoria LUNGA**: fatti persistenti su SQLite. `memory.py` (infra, singleton

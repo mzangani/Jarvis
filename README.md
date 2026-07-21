@@ -298,9 +298,15 @@ python main.py --ui        # oppure:  python server.py
   nella pagina compare un pannello di **autorizzazione** (Approva/Nega) con il tool e gli
   argomenti esatti. Se non rispondi entro 2 minuti, l'azione è **rifiutata** (mai
   silenzio-assenso).
-- **Voce dal browser** (facoltativa): il bottone 🎙 usa il riconoscimento vocale del
-  browser e 🔊 fa *parlare* le risposte (sintesi del browser) — funziona nei browser che
-  supportano le Web Speech API (Chrome, Safari, Edge), senza le dipendenze audio Python.
+- **Voce dal browser** (facoltativa): 🎙 riconoscimento vocale, 🔊 sintesi delle risposte,
+  ∞ **conversazione continua** (dopo la risposta torna in ascolto da solo) — Web Speech
+  API (Chrome, Safari, Edge), senza le dipendenze audio Python.
+- **Voce UMANA, non robotica**: nell'HUD il modello risponde in **registro parlato**
+  (breve, discorsivo, senza formattazione) e alla sintesi arriva una versione **ripulita**
+  (mai letti asterischi, simboli, emoji o URL). Il menu a tendina elenca le voci italiane
+  del tuo sistema **ordinate per qualità**: per il risultato migliore installa una voce
+  "Enhanced/Premium" (macOS: Impostazioni › Accessibilità › Contenuti pronunciati) o usa
+  Chrome ("Google italiano"). La scelta viene ricordata.
 - **Sicurezza**: il server ascolta **solo su 127.0.0.1** (non è raggiungibile dalla rete)
   e serve un turno per volta. Porta configurabile con `JARVIS_UI_PORT`.
 

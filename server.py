@@ -37,6 +37,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+# Import sicuro: voice.py non tira dentro l'audio al top del modulo (import guardati).
+# Ci serve pulisci_per_voce: la sintesi del BROWSER non deve leggere markdown/emoji.
+import voice
+
 # Quanto aspettiamo la risposta del browser a una conferma prima di considerare
 # l'azione RIFIUTATA (fail closed: mai un silenzio-assenso).
 _TIMEOUT_CONFERMA = 120  # secondi
@@ -63,6 +67,10 @@ class StatoServer:
         self._conferma_esito = False
         # L'aggancio: da qui in poi le conferme dell'agente passano dal browser.
         agent.conferma = self._conferma_via_browser
+        # REGISTRO PARLATO: nell'HUD le risposte possono venire lette ad alta voce dal
+        # browser, e comunque una conversazione fluida vuole risposte brevi e discorsive,
+        # non paginate. Riusiamo il blocco SYSTEM_VOCE della Fase 6.
+        agent.modalita_voce = True
 
     # --- eventi ---------------------------------------------------------------
     def emetti(self, tipo: str, **dati) -> None:
@@ -113,7 +121,11 @@ class StatoServer:
                     on_tool=lambda nome, ingresso: self.emetti("tool", tool=nome, input=ingresso),
                     on_note=lambda msg: self.emetti("nota", testo=msg),
                 )
-                self.emetti("risposta", testo=risposta)
+                # Doppia versione: 'testo' per lo SCHERMO (com'è), 'parlato' per la
+                # SINTESI del browser — ripulito da markdown/emoji/URL con la stessa
+                # funzione (pura, testata) della voce Python. Mai leggere i simboli.
+                self.emetti("risposta", testo=risposta,
+                            parlato=voice.pulisci_per_voce(risposta))
             except Exception as e:  # rete di sicurezza come in main.py: fail loud, server vivo
                 self.emetti("errore", testo=f"{type(e).__name__}: {e}")
             finally:
