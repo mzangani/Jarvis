@@ -35,6 +35,19 @@ Quattro famiglie in `tools/`:
 - **Web** (`web.py`): `leggi_pagina(url)` (anti-SSRF, HTML→testo) + RICERCA online via
   web search tool nativo dell'API (server tool).
 
+### ✅ FASE 8 — Nuove famiglie di tool
+Tre famiglie aggiuntive, stesse convenzioni (terne schema/funzione/rischio, sandbox):
+- **Appunti** (`appunti.py`): clipboard di sistema (`leggi_clipboard`/`scrivi_clipboard`,
+  via pbcopy/pbpaste o xclip/xsel/wl-clipboard) e note veloci append-only in un file
+  (`aggiungi_nota`/`elenca_note`, path via `JARVIS_NOTES`). Tutti SAFE.
+- **Utilità** (`utilita.py`): `data_ora` (orologio locale, in italiano) e `meteo(luogo)`
+  (via wttr.in, host FISSO — niente rischio SSRF, quindi SAFE). Solo stdlib.
+- **File avanzati** (`files_extra.py`): `info_file`/`hash_file` (SAFE) e `comprimi_zip`/
+  `estrai_zip` (CAUTION), quest'ultimo con cancello anti **zip-slip** (rifiuta le voci che
+  uscirebbero dalla destinazione). Solo stdlib (zipfile, hashlib).
+Test offline in `test_tools_extra.py` (zip roundtrip, anti zip-slip, hash, info, note,
+data/ora); clipboard e meteo si collaudano in locale/con rete.
+
 ### ✅ FASE 5 — Memoria
 - **5a — memoria LUNGA**: fatti persistenti su SQLite. `memory.py` (infra, singleton
   di connessione, FTS5 con ripiego LIKE onesto) + `tools/memory.py` con `ricorda` /
@@ -120,6 +133,7 @@ della fase in corso.
 | `ANTHROPIC_API_KEY` | Chiave API Anthropic (obbligatoria)                      | —                                    |
 | `JARVIS_SANDBOX`    | Cartella sicura per le operazioni sui file               | `~/Jarvis-Sandbox`                   |
 | `JARVIS_MEMORY`     | File SQLite della memoria lunga                          | `~/Jarvis-Sandbox/jarvis_memory.db`  |
+| `JARVIS_NOTES`      | File di testo delle note veloci (FASE 8)                 | `note.txt` (nella sandbox)           |
 | `JARVIS_MAX_TOKENS` | Soglia token oltre cui compattare la cronologia          | `40000`                              |
 | `JARVIS_LOG`        | File JSONL delle tool call (FASE 7a)                     | `~/Jarvis-Sandbox/jarvis.jsonl`      |
 | `JARVIS_API_RETRIES`| Ritentativi SDK sugli errori transitori (FASE 7b, >= 0)  | `4`                                  |

@@ -57,6 +57,10 @@ ATTESI = {
     "leggi_file", "lista_dir", "cerca_per_nome", "cerca_nel_contenuto",
     "scrivi_file", "sposta", "crea_cartella",
     "esegui_comando", "leggi_pagina", "ricorda", "richiama",
+    # Nuove famiglie: appunti (clipboard + note), utilità (data/ora + meteo), file avanzati.
+    "leggi_clipboard", "scrivi_clipboard", "aggiungi_nota", "elenca_note",
+    "data_ora", "meteo",
+    "info_file", "hash_file", "comprimi_zip", "estrai_zip",
 }
 nomi = {s["name"] for s in tools.SCHEMAS}
 mancanti = ATTESI - nomi
@@ -85,6 +89,10 @@ print("\n=== 4. un tool SAFE gira in isolamento ===")
 out = tools.dispatch("get_system_info", {})
 check("get_system_info restituisce testo non vuoto", isinstance(out, str) and bool(out.strip()))
 check("l'output contiene 'Sistema operativo'", "Sistema operativo" in out, f"-> {out[:60]!r}…")
+# Un tool della nuova famiglia "utilità": data_ora è SAFE e offline (solo l'orologio).
+ora = tools.dispatch("data_ora", {})
+check("data_ora gira e restituisce testo", isinstance(ora, str) and ora.startswith("Oggi è"),
+      f"-> {ora!r}")
 
 # --- 5) VOCE (Fase 6): il design OPZIONALE/GUARDATO regge senza dipendenze audio --------
 print("\n=== 5. voce: modulo opzionale e guardato ===")

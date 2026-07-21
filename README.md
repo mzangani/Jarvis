@@ -102,12 +102,14 @@ Ogni tool ha un **livello di rischio**: `SAFE` (esegue subito), `CAUTION`/`DANGE
 | **Sistema** | `get_system_info`, `elenca_processi` | SAFE |
 | | `apri_applicazione`, `screenshot` | CAUTION |
 | | `chiudi_processo` | DANGEROUS |
-| **File** | `leggi_file`, `lista_dir`, `cerca_per_nome`, `cerca_nel_contenuto` | SAFE |
-| | `scrivi_file`, `sposta`, `crea_cartella` | CAUTION |
+| **File** | `leggi_file`, `lista_dir`, `cerca_per_nome`, `cerca_nel_contenuto`, `info_file`, `hash_file` | SAFE |
+| | `scrivi_file`, `sposta`, `crea_cartella`, `comprimi_zip`, `estrai_zip` | CAUTION |
 | **Shell** | `esegui_comando` | DANGEROUS |
 | **Web** | `leggi_pagina` | CAUTION |
 | | `web_search` (eseguito dai server Anthropic) | — |
 | **Memoria** | `ricorda`, `richiama` | SAFE |
+| **Appunti** | `leggi_clipboard`, `scrivi_clipboard`, `aggiungi_nota`, `elenca_note` | SAFE |
+| **Utilità** | `data_ora`, `meteo` | SAFE |
 
 ## Sicurezza e sandbox
 
@@ -161,6 +163,7 @@ Le chiamate all'API sono resistenti ai guasti:
 | `ANTHROPIC_API_KEY` | Chiave API Anthropic (**obbligatoria**) | — |
 | `JARVIS_SANDBOX` | Cartella sicura per le operazioni sui file | `~/Jarvis-Sandbox` |
 | `JARVIS_MEMORY` | File SQLite della memoria lunga | `~/Jarvis-Sandbox/jarvis_memory.db` |
+| `JARVIS_NOTES` | File di testo delle note veloci (`aggiungi_nota`/`elenca_note`) | `note.txt` (nella sandbox) |
 | `JARVIS_MAX_TOKENS` | Soglia token oltre cui compattare la cronologia | `40000` |
 | `JARVIS_LOG` | File JSONL delle tool call | `~/Jarvis-Sandbox/jarvis.jsonl` |
 | `JARVIS_API_RETRIES` | Ritentativi SDK sugli errori transitori (≥ 0) | `4` |
