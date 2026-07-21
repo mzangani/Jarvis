@@ -256,6 +256,11 @@ class Agent:
         # (risposte brevi e senza formattazione, adatte a essere lette a voce). Lo attiva
         # `voice.avvia_voce`; in modalità testo resta False e nulla cambia.
         self.modalita_voce = False
+        # CONFERMA INIETTABILE (Fase 9, front end): il cancello di conferma per i tool
+        # non-SAFE. Default: il prompt a console di safety.confirm (REPL e voce). Un
+        # front end diverso (es. il server web) la sostituisce con la propria — stessa
+        # firma (nome_tool, tool_input, rischio) -> bool — senza toccare il loop.
+        self.conferma = safety.confirm
         # Quanti token di INPUT ha usato l'ultima chiamata all'API in questo turno.
         # È il segnale (gratis, incluso in ogni risposta) per decidere se compattare
         # la cronologia a fine turno. 0 = nessuna chiamata ancora.
@@ -562,7 +567,7 @@ class Agent:
                 # esplicita PRIMA di eseguire. Se l'utente rifiuta, non eseguiamo e
                 # rimandiamo al modello un tool_result che glielo comunica (così può
                 # proporre un'alternativa invece di bloccarsi).
-                if rischio != safety.SAFE and not safety.confirm(
+                if rischio != safety.SAFE and not self.conferma(
                     block.name, block.input, rischio
                 ):
                     rifiuto = "L'utente ha rifiutato l'esecuzione di questa azione."

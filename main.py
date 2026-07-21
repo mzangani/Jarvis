@@ -43,6 +43,18 @@ def main() -> None:
     # Carica le variabili da un file .env (in particolare ANTHROPIC_API_KEY).
     load_dotenv()
 
+    # FRONT END WEB (Fase 9, opzionale): `--ui` avvia il server locale con la pagina
+    # HUD e cede a lui il controllo. Come la voce, è un guscio: il cervello non cambia.
+    if "--ui" in sys.argv:
+        import server
+        srv = server.avvia()
+        try:
+            srv.serve_forever()
+        except KeyboardInterrupt:
+            console.print("\n[dim]Arrivederci.[/]")
+            srv.shutdown()
+        return
+
     agent = Agent()
 
     # MODALITÀ VOCE (Fase 6, OPZIONALE). È un guscio attorno allo stesso `agent`: il loop

@@ -55,6 +55,7 @@ dell'interfaccia, e l'unica parte che stampa è la REPL.
 | File / cartella | Ruolo |
 |---|---|
 | `main.py` | La **REPL**: legge l'input, chiama l'agente, stampa (con `rich`). È l'unico file che scrive a schermo. |
+| `server.py` + `ui/` | Il **front end web** (Fase 9): server locale stdlib + pagina HUD stile Iron Man. |
 | `brain.py` | Il **loop agentico GENERICO**: tiene la cronologia, chiama l'API, esegue i tool richiesti e rimanda i risultati al modello; gestisce robustezza e compattazione. |
 | `safety.py` | **Sicurezza**: livelli di rischio, conferma, sandbox dei file, blacklist della shell, guardiano anti-SSRF per il web. |
 | `memory.py` | **Memoria lunga**: fatti persistenti su SQLite. |
@@ -174,6 +175,7 @@ Le chiamate all'API sono resistenti ai guasti:
 | `JARVIS_PIPER_MODEL` | Percorso del modello voce piper (.onnx) per il TTS | nome di comodo (da impostare) |
 | `JARVIS_VAD` | Rilevazione del silenzio nell'ascolto (`0` = finestra fissa) | attiva |
 | `JARVIS_VAD_SOGLIA` | Sensibilità del VAD (energia RMS): più alta = meno sensibile | `0.015` |
+| `JARVIS_UI_PORT` | Porta del front end web locale (Fase 9) | `8765` |
 
 Tutte le opzionali sono documentate anche in [`.env.example`](.env.example).
 
@@ -279,6 +281,28 @@ installata una "Enhanced"/"Premium", che suona molto più naturale).
 > end-to-end con `say`. Con piper i backend audio vanno **collaudati in locale** (servono
 > microfono/altoparlanti e il binario piper). Limite residuo: la conferma delle azioni
 > CAUTION/DANGEROUS passa ancora dalla **tastiera** anche in modalità voce.
+
+## Front end web (Fase 9) — l'HUD stile Iron Man
+
+Jarvis ha anche un'interfaccia **web locale** in stile HUD (arc reactor pulsante, tema
+scuro/ciano, log dei comandi): un altro *guscio* attorno allo stesso cervello, come la
+voce. **Zero dipendenze nuove**: il server è libreria standard (`http.server` + SSE) e la
+pagina è un singolo HTML senza risorse esterne.
+
+```bash
+python main.py --ui        # oppure:  python server.py
+# si apre il browser su http://127.0.0.1:8765
+```
+
+- **Conferme nel browser**: quando Jarvis vuole eseguire un'azione CAUTION/DANGEROUS,
+  nella pagina compare un pannello di **autorizzazione** (Approva/Nega) con il tool e gli
+  argomenti esatti. Se non rispondi entro 2 minuti, l'azione è **rifiutata** (mai
+  silenzio-assenso).
+- **Voce dal browser** (facoltativa): il bottone 🎙 usa il riconoscimento vocale del
+  browser e 🔊 fa *parlare* le risposte (sintesi del browser) — funziona nei browser che
+  supportano le Web Speech API (Chrome, Safari, Edge), senza le dipendenze audio Python.
+- **Sicurezza**: il server ascolta **solo su 127.0.0.1** (non è raggiungibile dalla rete)
+  e serve un turno per volta. Porta configurabile con `JARVIS_UI_PORT`.
 
 ## Verifica rapida (smoke-test)
 

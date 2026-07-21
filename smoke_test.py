@@ -46,6 +46,7 @@ import safety
 import memory  # noqa: F401
 import history  # noqa: F401
 import logger  # noqa: F401
+import server  # noqa: F401  (il front end web, Fase 9: stdlib, importarlo non apre porte)
 import tools
 check("tutti i moduli si importano", True)
 

@@ -48,6 +48,22 @@ Tre famiglie aggiuntive, stesse convenzioni (terne schema/funzione/rischio, sand
 Test offline in `test_tools_extra.py` (zip roundtrip, anti zip-slip, hash, info, note,
 data/ora); clipboard e meteo si collaudano in locale/con rete.
 
+### ✅ FASE 9 — Front end web (HUD stile Iron Man)
+Un terzo guscio attorno allo stesso Agent (dopo REPL e voce), a ZERO dipendenze nuove:
+- **`server.py`**: server locale stdlib (`http.server`), solo su 127.0.0.1. Eventi al
+  browser via SSE (stati, tool usati, note, risposte); un turno per volta (409 se
+  occupato); avvio con `python main.py --ui` o `python server.py`; porta via
+  `JARVIS_UI_PORT` (default 8765).
+- **Conferma iniettabile**: `brain.Agent.conferma` (default `safety.confirm`, REPL e voce
+  invariati). Il server la sostituisce: l'evento `conferma_richiesta` mostra nel browser
+  un pannello Approva/Nega con tool+argomenti; il thread di lavoro attende la risposta,
+  con TIMEOUT (120 s) che scade in RIFIUTO (mai silenzio-assenso).
+- **`ui/index.html`**: pagina singola senza risorse esterne — arc reactor animato (CSS),
+  tema scuro/ciano, log comandi/sistema, pannello di autorizzazione, e voce dal BROWSER
+  facoltativa (Web Speech API: 🎙 riconoscimento, 🔊 sintesi) senza dipendenze Python.
+- **Test** (`test_server.py`, offline con agente finto): pagina servita, sequenza eventi
+  SSE di un turno, conferma approva/nega end-to-end, errori onesti (400/409/404).
+
 ### ✅ FASE 5 — Memoria
 - **5a — memoria LUNGA**: fatti persistenti su SQLite. `memory.py` (infra, singleton
   di connessione, FTS5 con ripiego LIKE onesto) + `tools/memory.py` con `ricorda` /
@@ -144,3 +160,4 @@ della fase in corso.
 | `JARVIS_PIPER_MODEL`| Percorso del modello voce piper (.onnx) per il TTS       | nome di comodo (da impostare)        |
 | `JARVIS_VAD`        | Rilevazione del silenzio nell'ascolto (`0` = finestra fissa) | attiva                           |
 | `JARVIS_VAD_SOGLIA` | Sensibilità del VAD (energia RMS): più alta = meno sensibile | `0.015`                          |
+| `JARVIS_UI_PORT`    | Porta del front end web locale (FASE 9)                  | `8765`                               |
