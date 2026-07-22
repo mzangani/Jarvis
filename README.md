@@ -114,6 +114,9 @@ Ogni tool ha un **livello di rischio**: `SAFE` (esegue subito), `CAUTION`/`DANGE
 | **Memoria** | `ricorda`, `richiama` | SAFE |
 | **Appunti** | `leggi_clipboard`, `scrivi_clipboard`, `aggiungi_nota`, `elenca_note` | SAFE |
 | **Utilità** | `data_ora`, `meteo` | SAFE |
+| **Mac** | `volume`, `musica`, `notifica`, `timer`, `timer_attivi` | SAFE |
+| **Calendario** | `impegni`, `promemoria_lista`, `promemoria_aggiungi` | SAFE |
+| **Domotica** | `luce`, `tapparella`, `stato_luce`, `punti_scs` (BTicino/SCS) | SAFE |
 
 ## Sicurezza e sandbox
 
@@ -183,6 +186,10 @@ Le chiamate all'API sono resistenti ai guasti:
 | `JARVIS_MODEL_BASE` | Modello del livello base | `claude-haiku-4-5` |
 | `JARVIS_MODEL_NORMALE` | Modello del livello normale | `claude-sonnet-4-6` |
 | `JARVIS_MODEL_PROFONDO` | Modello del livello profondo | `claude-opus-4-8` |
+| `JARVIS_SCS_HOST` | IP del gateway domotico BTicino/SCS (Fase 11) | — (domotica spenta) |
+| `JARVIS_SCS_PORT` | Porta OpenWebNet del gateway | `20000` |
+| `JARVIS_SCS_PASSWORD` | Password OPEN numerica del gateway (se richiesta) | — |
+| `JARVIS_SCS_PUNTI` | Mappa nomi → indirizzi SCS (`"cucina=12, salotto=25"`) | — |
 
 Tutte le opzionali sono documentate anche in [`.env.example`](.env.example).
 
@@ -288,6 +295,37 @@ installata una "Enhanced"/"Premium", che suona molto più naturale).
 > end-to-end con `say`. Con piper i backend audio vanno **collaudati in locale** (servono
 > microfono/altoparlanti e il binario piper). Limite residuo: la conferma delle azioni
 > CAUTION/DANGEROUS passa ancora dalla **tastiera** anche in modalità voce.
+
+## Mac, Calendario e Domotica (Fase 11)
+
+Tre famiglie da **assistente personale vero**, tutte a zero dipendenze:
+
+- **Mac** (via `osascript`, di serie su macOS): volume, musica (play/pausa/brani),
+  notifiche a schermo e **timer** («timer di 10 minuti per la pasta» — nota onesta: il
+  timer vive finché Jarvis è aperto). Al primo uso macOS chiede il permesso
+  "Automazione", una tantum.
+- **Calendario e Promemoria** (app di sistema del Mac): *«che impegni ho domani?»*,
+  *«ricordami di chiamare Luca alle 18»* — i promemoria restano nell'app Promemoria e
+  suonano anche a Jarvis spento. Le query al Calendario possono richiedere qualche
+  secondo su calendari molto pieni.
+- **Domotica BTicino/SCS (MyHome)**: Jarvis parla **OpenWebNet** direttamente col
+  gateway del tuo impianto (MyHomeServer1, F454, MH202…) — *«accendi la luce in
+  cucina»*, *«tira giù le tapparelle»*, *«è accesa la luce in bagno?»*, *«spegni tutte
+  le luci»* (punto `0`). Protocollo testuale su TCP, implementato in pura libreria
+  standard: niente Home Assistant, niente servizi in mezzo.
+
+**Setup domotica** (in `.env`):
+
+```bash
+JARVIS_SCS_HOST=192.168.1.35            # l'IP del tuo gateway SCS
+JARVIS_SCS_PUNTI="cucina=12, salotto=25, tapparella camera=7"   # nomi → indirizzi SCS
+# JARVIS_SCS_PASSWORD=12345             # solo se il gateway chiede la password OPEN
+```
+
+Consiglio: nel configuratore del gateway, aggiungi l'IP del Mac tra gli **IP abilitati**
+— così non serve password. I gateway recenti che impongono l'autenticazione HMAC non
+sono ancora supportati (Jarvis te lo dice chiaramente se la incontra). Gli indirizzi
+(A/PL) dei punti luce li trovi nel progetto dell'impianto o nell'app MyHome_Up.
 
 ## Livelli di ragionamento (Fase 10)
 

@@ -104,6 +104,29 @@ Jarvis lavora a TRE livelli, cambiati a runtime dal MODELLO stesso (o dall'utent
   cronologia pulita, nota emessa), livello già attivo, livello sconosciuto, guardia
   anti-rimbalzo con rollback.
 
+### ✅ FASE 11 — Assistente personale: Mac, Calendario, Domotica
+Tre famiglie native (zero dipendenze), scelte al posto di MCP dove i tool diretti sono
+più semplici e sicuri:
+- **Mac** (`tools/mac.py`, via osascript): volume, musica, notifiche, timer con
+  notifica allo scadere (vive finché Jarvis è aperto; thread daemon). Import guardato:
+  fuori da macOS errore chiaro, mai oscuro.
+- **Calendario** (`tools/calendario.py`): impegni (oggi/domani/settimana, date calcolate
+  per COMPONENTI in AppleScript — mai parsing di date testuali, dipende dalla lingua),
+  promemoria_lista/aggiungi (scadenza ISO validata; additivo e reversibile → SAFE).
+  Timeout largo: Calendar via AppleScript è lento sui calendari pieni.
+- **Domotica BTicino/SCS** (`tools/domotica.py`): client OPENWEBNET in pura stdlib
+  (socket, porta 20000 del gateway MyHome). Protocollo in FUNZIONI PURE (cornici
+  *CHI*COSA*DOVE##, parsing stato, mappa punti JARVIS_SCS_PUNTI nome→indirizzo,
+  algoritmo password OPEN — combacia col vettore noto della documentazione). Tool:
+  luce/tapparella/stato_luce/punti_scs, tutti SAFE (azioni fisiche benigne e
+  reversibili, chieste a voce); scenari/allarmi NON esposti deliberatamente. Host FISSO
+  da env (mai scelto dal modello), indirizzi validati numerici, HMAC non supportato
+  (errore chiaro: abilitare l'IP nel gateway). Config: JARVIS_SCS_HOST/PORT/PASSWORD/PUNTI.
+- **Test** (`test_domotica.py`, senza impianto): cornici, mappa punti, password OPEN, e
+  il dialogo COMPLETO contro un FINTO GATEWAY socket su localhost (handshake, sessione
+  comandi, autenticazione OPEN, ACK/NACK). La validazione sull'impianto vero è da fare
+  in casa (come l'audio per la voce).
+
 ### ✅ FASE 5 — Memoria
 - **5a — memoria LUNGA**: fatti persistenti su SQLite. `memory.py` (infra, singleton
   di connessione, FTS5 con ripiego LIKE onesto) + `tools/memory.py` con `ricorda` /
@@ -205,3 +228,7 @@ della fase in corso.
 | `JARVIS_MODEL_BASE` | Modello del livello base                                 | `claude-haiku-4-5`                   |
 | `JARVIS_MODEL_NORMALE`| Modello del livello normale                            | `claude-sonnet-4-6`                  |
 | `JARVIS_MODEL_PROFONDO`| Modello del livello profondo (thinking adattivo)      | `claude-opus-4-8`                    |
+| `JARVIS_SCS_HOST`   | IP del gateway domotico BTicino/SCS (FASE 11)            | — (domotica spenta)                  |
+| `JARVIS_SCS_PORT`   | Porta OpenWebNet del gateway                             | `20000`                              |
+| `JARVIS_SCS_PASSWORD`| Password OPEN numerica (se il gateway la chiede)        | —                                    |
+| `JARVIS_SCS_PUNTI`  | Mappa nomi → indirizzi SCS ("cucina=12, salotto=25")     | —                                    |

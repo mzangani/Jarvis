@@ -62,6 +62,10 @@ ATTESI = {
     "leggi_clipboard", "scrivi_clipboard", "aggiungi_nota", "elenca_note",
     "data_ora", "meteo",
     "info_file", "hash_file", "comprimi_zip", "estrai_zip",
+    # Fase 11: Mac (controllo), Calendario/Promemoria, Domotica BTicino/SCS.
+    "volume", "musica", "notifica", "timer", "timer_attivi",
+    "impegni", "promemoria_lista", "promemoria_aggiungi",
+    "luce", "tapparella", "stato_luce", "punti_scs",
 }
 nomi = {s["name"] for s in tools.SCHEMAS}
 mancanti = ATTESI - nomi

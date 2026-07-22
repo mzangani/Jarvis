@@ -11,13 +11,15 @@ in due oggetti comodi per brain.py:
 """
 
 from . import files, system, shell, web, memory, appunti, utilita, files_extra
+from . import mac, calendario, domotica
 
 # Fase 10 (livelli): la variante del web search dipende dal MODELLO in uso.
 # Riesportiamo la funzione così brain.py la prende da `tools` come tutto il resto.
 from .web import server_tools_per_modello  # noqa: F401
 
 # Elenco dei moduli-famiglia. Ogni famiglia espone TOOLS (e opzionalmente PRECHECKS).
-_MODULI = [system, files, shell, web, memory, appunti, utilita, files_extra]
+_MODULI = [system, files, shell, web, memory, appunti, utilita, files_extra,
+           mac, calendario, domotica]
 
 # Costruiamo il "registro": schema per l'API + mappa nome -> funzione + mappa
 # nome -> rischio + mappa nome -> pre-check (validazione categorica prima della conferma).
