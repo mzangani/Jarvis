@@ -138,6 +138,36 @@ check("_scegli con nomi inesistenti -> None",
 
 
 # ============================================================================
+# 6bis) meteo — le funzioni PURE (codici WMO e formattazione) senza rete
+# ============================================================================
+print("\n=== 6bis. meteo: funzioni pure ===")
+check("WMO 0 = sereno", utilita.descrizione_wmo(0) == "sereno")
+check("WMO 95 = temporale", utilita.descrizione_wmo(95) == "temporale")
+check("WMO ignoto -> onesto", utilita.descrizione_wmo(42) == "condizione 42")
+
+_corrente = {"weather_code": 3, "temperature_2m": 25.4, "apparent_temperature": 27.2,
+             "relative_humidity_2m": 61, "wind_speed_10m": 11.6}
+frase = utilita.formatta_corrente("Milano", _corrente)
+check("formatta_corrente leggibile",
+      frase == "Milano: coperto, 25°C (percepiti 27°C), umidità 61%, vento 12 km/h.",
+      f"-> {frase!r}")
+
+_daily = {"weather_code": [3, 61], "temperature_2m_max": [31.2, 24.0],
+          "temperature_2m_min": [20.1, 18.4], "precipitation_probability_max": [0, 60]}
+frase = utilita.formatta_domani("Milano", _daily)
+check("formatta_domani usa l'indice 1 (domani)",
+      frase == "Domani a Milano: pioggia leggera, minima 18°C, massima 24°C, "
+               "probabilità di precipitazioni 60%.",
+      f"-> {frase!r}")
+
+try:
+    utilita.meteo("Milano", quando="dopodomani")
+    check("quando non valido respinto", False, "non ha sollevato")
+except ValueError:
+    check("quando non valido respinto", True)
+
+
+# ============================================================================
 # 7) apri_url — guardiano SSRF attivo; apertura verificata con un browser finto
 # ============================================================================
 print("\n=== 7. apri_url (fonti nel browser) ===")

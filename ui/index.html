@@ -223,6 +223,7 @@
     <div id="controlli-voce">
       <button id="btn-mic" class="tondo" title="Modalità vocale continua: parla, ti risponde, ti riascolta. Premi di nuovo per uscire.">🎙</button>
       <button id="btn-tts" class="tondo" title="Leggi le risposte a voce anche quando scrivo da tastiera">🔊</button>
+      <button id="btn-wake" class="tondo" title="Filtro nome: eseguo solo i comandi che iniziano con «Jarvis» (ignoro TV e conversazioni)">🗣</button>
     </div>
     <select id="sel-voce" title="La voce di Jarvis (le migliori in alto)"></select>
   </section>
@@ -395,12 +396,33 @@ function programmaRiavvio(ms) {
   riavvioTimer = setTimeout(avviaAscolto, ms || 350);
 }
 
+/* FILTRO NOME (🗣): quando attivo, solo le frasi che iniziano con «Jarvis» vengono
+   eseguite — TV, altre persone e chiacchiere di sottofondo vengono ignorate (e in
+   modalità continua si torna semplicemente in ascolto). Non è riconoscimento del
+   PARLANTE: chiunque può dire «Jarvis» — è un filtro di indirizzamento. */
+const btnWake = $("btn-wake");
+let wakeAttivo = localStorage.getItem("jarvis_wake") === "1";
+btnWake.classList.toggle("attivo", wakeAttivo);
+btnWake.onclick = () => {
+  wakeAttivo = !wakeAttivo;
+  btnWake.classList.toggle("attivo", wakeAttivo);
+  localStorage.setItem("jarvis_wake", wakeAttivo ? "1" : "0");
+  riga("sistema", "Sistema", wakeAttivo
+    ? "Filtro nome attivo: eseguo solo i comandi che iniziano con «Jarvis»."
+    : "Filtro nome disattivato.");
+};
+
 if (Ricon) {
   ric = new Ricon();
   ric.lang = "it-IT"; ric.interimResults = false; ric.maxAlternatives = 1;
   ric.onstart = () => btnMic.classList.add("ascolto");
   ric.onresult = ev => {
-    const testo = ev.results[0][0].transcript.trim();
+    let testo = ev.results[0][0].transcript.trim();
+    if (wakeAttivo) {
+      if (!/^jarvis\b/i.test(testo)) return;  // non rivolto a me: onend riarma l'ascolto
+      testo = testo.replace(/^jarvis[\s,.!?]*/i, "").trim();
+      if (!testo) return;                      // solo il nome, nessun comando
+    }
     if (testo) { ingresso.value = testo; inviaTesto(); }
   };
   ric.onerror = ev => {

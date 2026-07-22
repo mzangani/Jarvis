@@ -456,7 +456,16 @@ def avvia_voce(agent, *, console=None, wake_word: Optional[str] = None) -> None:
     Può sollevare RuntimeError se le dipendenze audio mancano (lo gestisce main.py, che
     in quel caso ripiega sulla REPL testuale). `console` (rich) è opzionale, solo per
     mostrare lo stato a schermo: coerente con l'architettura, la logica non stampa da sé.
+
+    `wake_word`: se non passata, si legge da JARVIS_WAKE_WORD (es. "jarvis"): con la
+    wake word attiva, solo le frasi che INIZIANO con quella parola arrivano al modello
+    — TV, altre persone e conversazioni di sottofondo vengono ignorate. Le frasi
+    d'uscita ("esci") funzionano comunque anche senza prefisso.
     """
+    if wake_word is None:
+        import os
+        wake_word = os.environ.get("JARVIS_WAKE_WORD", "").strip() or None
+
     backend = crea_backend_reali()  # può sollevare RuntimeError (deps mancanti)
 
     # Diciamo all'agente che ora parla a VOCE: risponderà breve e senza formattazione

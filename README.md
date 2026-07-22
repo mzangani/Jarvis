@@ -113,7 +113,7 @@ Ogni tool ha un **livello di rischio**: `SAFE` (esegue subito), `CAUTION`/`DANGE
 | | `web_search` (eseguito dai server Anthropic) | — |
 | **Memoria** | `ricorda`, `richiama` | SAFE |
 | **Appunti** | `leggi_clipboard`, `scrivi_clipboard`, `aggiungi_nota`, `elenca_note` | SAFE |
-| **Utilità** | `data_ora`, `meteo` | SAFE |
+| **Utilità** | `data_ora`, `meteo` (oggi/domani, via Open-Meteo con ripiego wttr.in) | SAFE |
 | **Mac** | `volume`, `musica`, `notifica`, `timer`, `timer_attivi` | SAFE |
 | **Calendario** | `impegni`, `promemoria_lista`, `promemoria_aggiungi` | SAFE |
 | **Domotica** | `luce`, `tapparella`, `stato_luce`, `punti_scs` (BTicino/SCS) | SAFE |
@@ -372,6 +372,11 @@ python main.py --ui        # oppure:  python server.py
   voce** → torna in ascolto da solo, finché non lo spegni. (Il 🔊 serve solo a farsi
   leggere le risposte quando scrivi da tastiera.) Web Speech API (Chrome, Safari,
   Edge), senza le dipendenze audio Python.
+- **Filtro nome** (🗣): quando attivo, Jarvis esegue **solo i comandi che iniziano con
+  «Jarvis»** («Jarvis, accendi la luce») e ignora TV, altre persone e chiacchiere di
+  sottofondo. Nella voce Python l'equivalente è `JARVIS_WAKE_WORD=jarvis` in `.env`.
+  Nota onesta: è un filtro di *indirizzamento*, non un riconoscimento del *parlante* —
+  chiunque può dire «Jarvis» (le azioni delicate restano protette dalle conferme).
 - **Fonti su richiesta**: quando risponde basandosi sul web, Jarvis cita la fonte e ti
   **chiede** se vuoi vederla; se dici sì, la **apre nel browser** (`apri_url`, protetto
   dallo stesso guardiano anti-SSRF di `leggi_pagina`).
